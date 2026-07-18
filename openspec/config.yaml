@@ -1,0 +1,48 @@
+schema: spec-driven
+
+context: |
+  Project: Storyboard - a portable, Jira-like desktop viewer/manager for
+  OpenSpec projects (proposals as stories, tasks as tickets). Binary name:
+  storyboard. Multi-project dashboard: user registers several project folders
+  and sees all changes across them on one overview.
+  Write scope: toggle task checkboxes AND edit task/proposal text from the UI
+  (markdown round-tripping must preserve untouched formatting). External file
+  edits always win; UI state reloads from disk via fsnotify + SSE.
+  Tech stack: Go backend (single static binary, zero install, cross-compiled
+  for Windows/macOS/Linux) exposing a JSON REST API + SSE for live updates,
+  serving a React + TypeScript + Vite SPA embedded via go:embed (built dist/
+  only; Node is a dev-time dependency, never shipped). Opens the default
+  browser on localhost. Frontend: @dnd-kit for kanban drag-drop, TanStack
+  Query for data fetching.
+  Reads OpenSpec state by parsing the openspec/ directory directly (markdown
+  files, config.yaml) - no dependency on the openspec CLI at runtime.
+  Live refresh via fsnotify file watching.
+  Goals: showcase idiomatic Go (library-first internal/ packages, table-driven
+  tests, goroutines/channels for watching, go:embed) as a CV/portfolio project.
+  The author is NEW to Go: break tasks small, order them to teach (structs ->
+  interfaces -> goroutines), sequence risky work late (text editing and
+  multi-project registry come after a working single-project toggle-only board).
+  Design language ("drafting table"): light drafting-paper theme (#F7F9FA bg,
+  #1B2A33 ink, #2456A6 blueprint accent, #2E7D4F done-green), IBM Plex Sans +
+  IBM Plex Mono (bundled woff2, no CDN). Signature: clickable monospace [ ]/[x]
+  checkbox glyphs plus a live activity strip narrating file changes. UI never
+  shows state not derivable from files.
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+# Add your tech stack, conventions, style guides, domain knowledge, etc.
+# Example:
+#   context: |
+#     Tech stack: TypeScript, React, Node.js
+#     We use conventional commits
+#     Domain: e-commerce platform
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours

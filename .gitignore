@@ -1,0 +1,19 @@
+# Go build artifacts
+/storyboard
+/storyboard.exe
+/dist/
+*.test
+*.out
+
+# Frontend (Vite/Node) - scaffolded in a later PR
+frontend/node_modules/
+frontend/dist/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local, per-developer tool settings (not shared)
+.claude/settings.local.json
