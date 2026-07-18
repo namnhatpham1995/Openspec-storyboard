@@ -5,6 +5,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 )
 
@@ -13,13 +14,25 @@ import (
 var version = "dev"
 
 func main() {
-	showVersion := flag.Bool("version", false, "print the version and exit")
-	flag.Parse()
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
 
-	if *showVersion {
-		fmt.Println("storyboard", version)
-		return
+// run contains main's logic without calling os.Exit, so it can be unit
+// tested directly. It returns the process exit code.
+func run(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("storyboard", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	showVersion := fs.Bool("version", false, "print the version and exit")
+
+	if err := fs.Parse(args); err != nil {
+		return 2
 	}
 
-	fmt.Fprintln(os.Stderr, "storyboard", version, "- server not implemented yet")
+	if *showVersion {
+		fmt.Fprintln(stdout, "storyboard", version)
+		return 0
+	}
+
+	fmt.Fprintln(stderr, "storyboard", version, "- server not implemented yet")
+	return 0
 }
