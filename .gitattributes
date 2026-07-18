@@ -1,0 +1,8 @@
+# Force LF for source/text files regardless of a contributor's local
+# core.autocrlf setting (Windows commonly defaults this to true, which
+# checks files out as CRLF and makes `gofmt -l` report false positives).
+* text=auto eol=lf
+
+# Parser test fixtures must keep their exact bytes (including a
+# deliberate CRLF fixture) — never let git rewrite line endings here.
+internal/openspec/testdata/** -text
