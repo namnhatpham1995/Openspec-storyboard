@@ -10,13 +10,13 @@ Each numbered group below is **one PR** on its own branch. Workflow per group: `
 
 ## 2. PR #2 — Parser package (branch: `feat/parser`)
 
-- [ ] 2.1 Define the domain structs: `Project`, `Change`, `Artifact`, `TaskGroup`, `Task` with JSON tags (learn: structs, slices, exported fields)
-- [ ] 2.2 Build test fixtures: copy this repo's real `openspec/` tree plus hand-made edge cases (empty change, archive, malformed tasks.md, CRLF file) into `internal/openspec/testdata/`
-- [ ] 2.3 Implement `Discover(fsys fs.FS)` finding `openspec/`, config.yaml schema name, active + archived change dirs; table-driven tests with `fstest.MapFS` (learn: interfaces via `io/fs`, error wrapping)
-- [ ] 2.4 Implement tasks.md parsing: `## ` groups, `- [ ]`/`- [x]` lines with id/text/state/line-number capture; preserve unknown lines verbatim in the model; table-driven tests covering every spec scenario
-- [ ] 2.5 Implement artifact presence detection (proposal/specs/design/tasks) per change
-- [ ] 2.6 Implement lifecycle derivation (Draft/In Progress/Complete/Archived) exactly per spec `openspec-parsing`; tests for each boundary case
-- [ ] 2.7 Run `go test ./... -cover`; reach solid coverage on the parser and fix anything the fixtures expose
+- [x] 2.1 Define the domain structs: `Project`, `Change`, `Artifact`, `TaskGroup`, `Task` with JSON tags (learn: structs, slices, exported fields)
+- [x] 2.2 Build test fixtures: copy this repo's real `openspec/` tree plus hand-made edge cases (empty change, archive, malformed tasks.md, CRLF file) into `internal/openspec/testdata/`
+- [x] 2.3 Implement `Discover(fsys fs.FS)` finding `openspec/`, config.yaml schema name, active + archived change dirs; table-driven tests with `fstest.MapFS` (learn: interfaces via `io/fs`, error wrapping)
+- [x] 2.4 Implement tasks.md parsing: `## ` groups, `- [ ]`/`- [x]` lines with id/text/state/line-number capture; preserve unknown lines verbatim in the model; table-driven tests covering every spec scenario
+- [x] 2.5 Implement artifact presence detection (proposal/specs/design/tasks) per change
+- [x] 2.6 Implement lifecycle derivation (Draft/In Progress/Complete/Archived) exactly per spec `openspec-parsing`; tests for each boundary case
+- [x] 2.7 Run `go test ./... -cover`; reach solid coverage on the parser and fix anything the fixtures expose
 
 ## 3. PR #3 — Read-only API server (branch: `feat/api-readonly`)
 
