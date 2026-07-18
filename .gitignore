@@ -15,5 +15,9 @@ frontend/dist/
 .DS_Store
 Thumbs.db
 
-# Local, per-developer tool settings (not shared)
-.claude/settings.local.json
+# AI planning/tooling artifacts (OpenSpec change proposals, Claude Code
+# and Codex command/skill config) - local working state, not committed.
+# Root-anchored so this never matches internal/openspec/ (real Go source).
+/openspec/
+/.claude/
+/.codex/
