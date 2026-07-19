@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRun(t *testing.T) {
@@ -14,13 +16,6 @@ func TestRun(t *testing.T) {
 		wantStdout string
 		wantStderr string
 	}{
-		{
-			name:       "no args prints not-implemented notice to stderr",
-			args:       nil,
-			wantCode:   0,
-			wantStdout: "",
-			wantStderr: "storyboard dev - server not implemented yet",
-		},
 		{
 			name:       "--version prints version to stdout",
 			args:       []string{"--version"},
@@ -51,5 +46,21 @@ func TestRun(t *testing.T) {
 				t.Errorf("stderr = %q, want it to contain %q", stderr.String(), tt.wantStderr)
 			}
 		})
+	}
+}
+
+func TestRunContextGracefulShutdown(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(50*time.Millisecond, cancel)
+	defer cancel()
+	var stdout, stderr bytes.Buffer
+
+	code := runContext(ctx, []string{"--addr", "127.0.0.1:0", "--project", "../.."}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Errorf("runContext() exit code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "shutting down server") {
+		t.Errorf("stderr = %q, want graceful shutdown log", stderr.String())
 	}
 }
