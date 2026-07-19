@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
 import { Link, useParams } from 'react-router-dom'
-import { getChangeDetail } from '../api/client'
-import type { ArtifactFile, Task } from '../api/types'
+import { APIError, getChangeDetail, toggleTask } from '../api/client'
+import type { ArtifactFile, FileVersion, Task } from '../api/types'
 import { ArtifactPipeline } from '../components/ArtifactPipeline'
 import { ErrorState } from '../components/ErrorState'
 import { TaskProgress } from '../components/TaskProgress'
@@ -11,15 +11,40 @@ import { useArrowNavigation } from '../hooks/useArrowNavigation'
 
 export function ChangeDetailPage() {
   const { name = '' } = useParams()
+  const queryClient = useQueryClient()
   const detail = useQuery({
     queryKey: ['change', name],
     queryFn: () => getChangeDetail(name),
     enabled: Boolean(name),
   })
   const [selectedPath, setSelectedPath] = useState('')
+  const [notice, setNotice] = useState<{ kind: 'conflict' | 'error'; message: string } | null>(null)
 
   const artifactFiles = detail.data?.artifactFiles
   const selectedArtifact = artifactFiles?.find((artifact) => artifact.path === selectedPath) ?? artifactFiles?.[0]
+  const tasksVersion = artifactFiles?.find((artifact) => artifact.path === 'tasks.md')?.version
+  const toggle = useMutation({
+    mutationFn: ({ taskID, version }: { taskID: string; version: FileVersion }) =>
+      toggleTask(name, taskID, version),
+    onSuccess: async () => {
+      setNotice(null)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['change', name] }),
+        queryClient.invalidateQueries({ queryKey: ['project', 'current'] }),
+      ])
+    },
+    onError: async (error) => {
+      if (error instanceof APIError && error.status === 409) {
+        setNotice({ kind: 'conflict', message: 'File changed externally. Reloaded the latest version from disk.' })
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['change', name] }),
+          queryClient.invalidateQueries({ queryKey: ['project', 'current'] }),
+        ])
+        return
+      }
+      setNotice({ kind: 'error', message: error instanceof Error ? error.message : 'Could not update the task.' })
+    },
+  })
 
   useEffect(() => {
     if (!selectedPath && artifactFiles?.[0]) setSelectedPath(artifactFiles[0].path)
@@ -44,6 +69,14 @@ export function ChangeDetailPage() {
         <p className="disk-note"><span aria-hidden="true">↻</span> Read directly from disk</p>
       </section>
 
+      {notice && (
+        <div className={`write-notice write-notice--${notice.kind}`} role="alert">
+          <span aria-hidden="true">{notice.kind === 'conflict' ? '↻' : '!'}</span>
+          <span>{notice.message}</span>
+          <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss notification">×</button>
+        </div>
+      )}
+
       <div className="detail-grid">
         <section className="task-panel" aria-labelledby="tasks-title">
           <div className="panel-heading"><p className="eyebrow">Plan</p><h2 id="tasks-title">Tasks</h2></div>
@@ -51,7 +84,15 @@ export function ChangeDetailPage() {
             <div className="task-group" key={group.heading}>
               <h3>{group.heading}</h3>
               <ul>
-                {(group.tasks ?? []).map((task) => <TaskRow key={`${task.id}-${task.line}`} task={task} />)}
+                {(group.tasks ?? []).map((task) => (
+                  <TaskRow
+                    key={`${task.id}-${task.line}`}
+                    task={task}
+                    disabled={!tasksVersion || toggle.isPending}
+                    pending={toggle.isPending && toggle.variables?.taskID === task.id}
+                    onToggle={(taskID) => tasksVersion && toggle.mutate({ taskID, version: tasksVersion })}
+                  />
+                ))}
               </ul>
             </div>
           ))}
@@ -80,13 +121,38 @@ export function ChangeDetailPage() {
   )
 }
 
-function TaskRow({ task }: { task: Task }) {
-  const onKeyDown = useArrowNavigation('[data-task-row]')
+function TaskRow({
+  task,
+  disabled,
+  pending,
+  onToggle,
+}: {
+  task: Task
+  disabled: boolean
+  pending: boolean
+  onToggle: (taskID: string) => void
+}) {
+  const onArrowKeyDown = useArrowNavigation('[data-task-row]')
+  const onKeyDown = (event: React.KeyboardEvent<HTMLLIElement>) => {
+    if (event.key === ' ' && !disabled && task.id) {
+      event.preventDefault()
+      onToggle(task.id)
+      return
+    }
+    onArrowKeyDown(event)
+  }
   return (
-    <li className={task.checked ? 'is-checked' : ''} tabIndex={0} data-task-row onKeyDown={onKeyDown}>
-      <span className="task-glyph mono" aria-label={task.checked ? 'Complete' : 'Incomplete'}>
-        {task.checked ? '[x]' : '[ ]'}
-      </span>
+    <li className={task.checked ? 'is-checked' : ''} tabIndex={0} data-task-row onKeyDown={onKeyDown} aria-busy={pending}>
+      <button
+        className="task-glyph mono"
+        type="button"
+        tabIndex={-1}
+        disabled={disabled || !task.id}
+        onClick={() => task.id && onToggle(task.id)}
+        aria-label={`${task.checked ? 'Mark incomplete' : 'Mark complete'}: task ${task.id || 'without id'}`}
+      >
+        {pending ? '[·]' : task.checked ? '[x]' : '[ ]'}
+      </button>
       {task.id && <span className="task-id mono">{task.id}</span>}
       <span>{task.text}</span>
     </li>
