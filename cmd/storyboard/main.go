@@ -58,14 +58,20 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return 1
 	}
 
+	app := server.New(*projectRoot, logger)
 	httpServer := &http.Server{
-		Handler:           server.New(*projectRoot, logger).Handler(),
+		Handler:           app.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	serveErrors := make(chan error, 1)
 	go func() {
 		serveErrors <- httpServer.Serve(listener)
+	}()
+	go func() {
+		if err := app.WatchProject(ctx); err != nil && ctx.Err() == nil {
+			logger.Error("live updates stopped", "error", err)
+		}
 	}()
 	logger.Info("storyboard server started", "version", version, "address", listener.Addr(), "project", *projectRoot)
 

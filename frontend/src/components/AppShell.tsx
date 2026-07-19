@@ -1,7 +1,11 @@
 import type { PropsWithChildren } from 'react'
 import { Link } from 'react-router-dom'
+import { useLiveEvents } from '../hooks/useLiveEvents'
+import { ActivityStrip } from './ActivityStrip'
 
 export function AppShell({ children }: PropsWithChildren) {
+  const { activities, connected, manualRefresh } = useLiveEvents()
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -15,6 +19,7 @@ export function AppShell({ children }: PropsWithChildren) {
         <div className="local-badge"><span aria-hidden="true" /> Local only</div>
       </header>
       <main>{children}</main>
+      <ActivityStrip activities={activities} connected={connected} onRefresh={manualRefresh} />
       <footer className="footer-note">Files on disk are the source of truth.</footer>
     </div>
   )

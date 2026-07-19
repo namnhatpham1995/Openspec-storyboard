@@ -21,6 +21,7 @@ type Server struct {
 	projectFS   fs.FS
 	writeRoot   string
 	logger      *slog.Logger
+	events      *eventHub
 }
 
 // New constructs a read-only API server rooted at projectRoot.
@@ -33,6 +34,7 @@ func New(projectRoot string, logger *slog.Logger) *Server {
 		projectFS:   os.DirFS(projectRoot),
 		writeRoot:   projectRoot,
 		logger:      logger,
+		events:      newEventHub(),
 	}
 }
 
@@ -41,7 +43,7 @@ func NewWithFS(projectRoot string, projectFS fs.FS, logger *slog.Logger) *Server
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{projectRoot: projectRoot, projectFS: projectFS, logger: logger}
+	return &Server{projectRoot: projectRoot, projectFS: projectFS, logger: logger, events: newEventHub()}
 }
 
 // Handler returns the complete HTTP handler for the server.
@@ -51,6 +53,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/projects/current", s.handleCurrentProject)
 	mux.HandleFunc("GET /api/changes/{name}", s.handleChangeDetail)
 	mux.HandleFunc("POST /api/changes/{name}/tasks/{id}/toggle", s.handleTaskToggle)
+	mux.HandleFunc("GET /api/events", s.handleEvents)
 	return s.logRequests(mux)
 }
 
@@ -125,6 +128,12 @@ type statusWriter struct {
 func (w *statusWriter) WriteHeader(status int) {
 	w.status = status
 	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *statusWriter) Flush() {
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 func (s *Server) logRequests(next http.Handler) http.Handler {
