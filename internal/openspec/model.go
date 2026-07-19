@@ -1,5 +1,7 @@
 package openspec
 
+import "time"
+
 // Status is a change's lifecycle stage, derived entirely from files on
 // disk (see DeriveStatus). Storyboard never stores its own status.
 type Status string
@@ -76,4 +78,27 @@ type Project struct {
 	// absent or has no "schema:" line.
 	SchemaName string   `json:"schemaName"`
 	Changes    []Change `json:"changes"`
+}
+
+// FileVersion identifies the exact on-disk revision of an artifact. Both
+// fields are exposed so future write endpoints can cheaply detect stale
+// clients while still having a content-based check when modtimes collide.
+type FileVersion struct {
+	ModTime time.Time `json:"modTime"`
+	Hash    string    `json:"hash"`
+}
+
+// Artifact is one markdown source file belonging to a change.
+type Artifact struct {
+	Kind    string      `json:"kind"`
+	Path    string      `json:"path"`
+	Content string      `json:"content"`
+	Version FileVersion `json:"version"`
+}
+
+// ChangeDetail combines the parsed change model with the raw markdown files
+// used to render its artifacts and perform future formatting-safe writes.
+type ChangeDetail struct {
+	Change
+	ArtifactFiles []Artifact `json:"artifactFiles"`
 }
