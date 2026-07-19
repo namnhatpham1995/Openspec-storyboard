@@ -53,3 +53,8 @@ export interface ArtifactFile {
 export interface ChangeDetail extends Change {
   artifactFiles: ArtifactFile[]
 }
+
+export interface ToggleResult {
+  task: Task
+  version: FileVersion
+}

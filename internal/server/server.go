@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -17,6 +19,7 @@ import (
 type Server struct {
 	projectRoot string
 	projectFS   fs.FS
+	writeRoot   string
 	logger      *slog.Logger
 }
 
@@ -28,6 +31,7 @@ func New(projectRoot string, logger *slog.Logger) *Server {
 	return &Server{
 		projectRoot: projectRoot,
 		projectFS:   os.DirFS(projectRoot),
+		writeRoot:   projectRoot,
 		logger:      logger,
 	}
 }
@@ -46,6 +50,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/projects/current", s.handleCurrentProject)
 	mux.HandleFunc("GET /api/changes/{name}", s.handleChangeDetail)
+	mux.HandleFunc("POST /api/changes/{name}/tasks/{id}/toggle", s.handleTaskToggle)
 	return s.logRequests(mux)
 }
 
@@ -71,12 +76,41 @@ func (s *Server) handleChangeDetail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, detail)
 }
 
+type toggleTaskRequest struct {
+	Version openspec.FileVersion `json:"version"`
+}
+
+func (s *Server) handleTaskToggle(w http.ResponseWriter, r *http.Request) {
+	if s.writeRoot == "" {
+		writeAPIError(w, http.StatusInternalServerError, "writes_unavailable", "writes are unavailable for this project source")
+		return
+	}
+	var request toggleTaskRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	result, err := openspec.ToggleTaskFile(s.writeRoot, r.PathValue("name"), r.PathValue("id"), request.Version)
+	if err != nil {
+		s.writeReadError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) writeReadError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, openspec.ErrChangeNotFound):
 		writeAPIError(w, http.StatusNotFound, "change_not_found", err.Error())
 	case errors.Is(err, openspec.ErrNotOpenSpecProject):
 		writeAPIError(w, http.StatusUnprocessableEntity, "not_openspec_project", err.Error())
+	case errors.Is(err, openspec.ErrTaskNotFound):
+		writeAPIError(w, http.StatusNotFound, "task_not_found", err.Error())
+	case errors.Is(err, openspec.ErrConflict):
+		writeAPIError(w, http.StatusConflict, "file_conflict", err.Error())
+	case errors.Is(err, openspec.ErrInvalidTaskLine):
+		writeAPIError(w, http.StatusUnprocessableEntity, "invalid_task_line", err.Error())
 	default:
 		s.logger.Error("reading OpenSpec project", "error", err)
 		writeAPIError(w, http.StatusInternalServerError, "read_failed", "could not read the OpenSpec project")
@@ -117,4 +151,16 @@ func writeAPIError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, map[string]any{
 		"error": map[string]string{"code": code, "message": message},
 	})
+}
+
+func decodeJSON(r *http.Request, target any) error {
+	decoder := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return fmt.Errorf("invalid JSON: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("invalid JSON: request must contain one object")
+	}
+	return nil
 }

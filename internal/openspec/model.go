@@ -102,3 +102,9 @@ type ChangeDetail struct {
 	Change
 	ArtifactFiles []Artifact `json:"artifactFiles"`
 }
+
+// ToggleResult is returned after a successful task write.
+type ToggleResult struct {
+	Task    Task        `json:"task"`
+	Version FileVersion `json:"version"`
+}
