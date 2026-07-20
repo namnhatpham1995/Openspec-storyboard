@@ -11,6 +11,7 @@ export function useLiveEvents() {
 
   const refreshQueries = useCallback(async () => {
     await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['projects'] }),
       queryClient.invalidateQueries({ queryKey: ['project', 'current'] }),
       queryClient.invalidateQueries({
         predicate: (query) => query.queryKey[0] === 'change',
@@ -33,12 +34,16 @@ export function useLiveEvents() {
 
       if (update.type === 'ready') {
         setConnected(true)
+        void refreshQueries()
         return
       }
       if (update.type !== 'project_changed') return
 
       if (update.activities?.length) {
-        setActivities((current) => [...update.activities!, ...current].slice(0, activityLimit))
+        const incoming = update.activities.map((activity) => update.projectName
+          ? { ...activity, message: `${update.projectName} · ${activity.message}` }
+          : activity)
+        setActivities((current) => [...incoming, ...current].slice(0, activityLimit))
       }
       void refreshQueries()
     }

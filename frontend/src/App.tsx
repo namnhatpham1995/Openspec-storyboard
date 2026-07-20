@@ -9,7 +9,7 @@ export default function App() {
     <AppShell>
       <Routes>
         <Route path="/" element={<BoardPage />} />
-        <Route path="/changes/:name" element={<ChangeDetailPage />} />
+        <Route path="/projects/:projectID/changes/:name" element={<ChangeDetailPage />} />
       </Routes>
     </AppShell>
   )

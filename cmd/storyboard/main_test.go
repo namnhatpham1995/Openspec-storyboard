@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -54,8 +56,16 @@ func TestRunContextGracefulShutdown(t *testing.T) {
 	time.AfterFunc(50*time.Millisecond, cancel)
 	defer cancel()
 	var stdout, stderr bytes.Buffer
+	projectRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(projectRoot, "openspec"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
-	code := runContext(ctx, []string{"--addr", "127.0.0.1:0", "--project", "../.."}, &stdout, &stderr)
+	code := runContext(ctx, []string{
+		"--addr", "127.0.0.1:0",
+		"--project", projectRoot,
+		"--config", filepath.Join(t.TempDir(), "config.json"),
+	}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Errorf("runContext() exit code = %d, want 0; stderr = %q", code, stderr.String())

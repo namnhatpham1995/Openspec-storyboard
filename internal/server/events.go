@@ -8,14 +8,21 @@ import (
 	"sync"
 	"time"
 
+	projectregistry "storyboard/internal/registry"
 	projectwatch "storyboard/internal/watch"
 )
 
 type liveEvent struct {
 	Type        string                  `json:"type"`
+	ProjectID   string                  `json:"projectId,omitempty"`
+	ProjectName string                  `json:"projectName,omitempty"`
 	ProjectRoot string                  `json:"projectRoot,omitempty"`
 	Activities  []projectwatch.Activity `json:"activities,omitempty"`
 	Timestamp   time.Time               `json:"timestamp"`
+}
+
+type projectWatcher struct {
+	cancel context.CancelFunc
 }
 
 type eventHub struct {
@@ -104,16 +111,77 @@ func (s *Server) WatchProject(ctx context.Context) error {
 	if s.writeRoot == "" {
 		return nil
 	}
-	snapshot, err := projectwatch.Capture(s.projectRoot)
+	return s.watchRoot(ctx, "", "", s.projectRoot)
+}
+
+// WatchProjects maintains one watcher for every registered project and reacts
+// to projects added or removed through the API.
+func (s *Server) WatchProjects(ctx context.Context) error {
+	s.watchMu.Lock()
+	s.watchCtx = ctx
+	s.watchMu.Unlock()
+	for _, project := range s.registry.List() {
+		s.startProjectWatcher(project)
+	}
+	<-ctx.Done()
+	s.watchMu.Lock()
+	for id, watcher := range s.watchers {
+		watcher.cancel()
+		delete(s.watchers, id)
+	}
+	s.watchCtx = nil
+	s.watchMu.Unlock()
+	return nil
+}
+
+func (s *Server) startProjectWatcher(project projectregistry.Project) {
+	s.watchMu.Lock()
+	if s.watchCtx == nil {
+		s.watchMu.Unlock()
+		return
+	}
+	if _, exists := s.watchers[project.ID]; exists {
+		s.watchMu.Unlock()
+		return
+	}
+	ctx, cancel := context.WithCancel(s.watchCtx)
+	handle := &projectWatcher{cancel: cancel}
+	s.watchers[project.ID] = handle
+	s.watchMu.Unlock()
+
+	go func() {
+		err := s.watchRoot(ctx, project.ID, project.Name, project.Path)
+		s.watchMu.Lock()
+		if s.watchers[project.ID] == handle {
+			delete(s.watchers, project.ID)
+		}
+		s.watchMu.Unlock()
+		if err != nil && ctx.Err() == nil {
+			s.logger.Error("project live updates stopped", "project", project.Path, "error", err)
+		}
+	}()
+}
+
+func (s *Server) stopProjectWatcher(id string) {
+	s.watchMu.Lock()
+	defer s.watchMu.Unlock()
+	if watcher := s.watchers[id]; watcher != nil {
+		watcher.cancel()
+		delete(s.watchers, id)
+	}
+}
+
+func (s *Server) watchRoot(ctx context.Context, projectID, projectName, projectRoot string) error {
+	snapshot, err := projectwatch.Capture(projectRoot)
 	if err != nil {
 		return err
 	}
-	watcher, err := projectwatch.New(s.projectRoot, 300*time.Millisecond)
+	watcher, err := projectwatch.New(projectRoot, 300*time.Millisecond)
 	if err != nil {
 		return err
 	}
 	return watcher.Run(ctx, func() {
-		next, err := projectwatch.Capture(s.projectRoot)
+		next, err := projectwatch.Capture(projectRoot)
 		if err != nil {
 			s.logger.Error("reloading changed project", "error", err)
 			return
@@ -123,7 +191,9 @@ func (s *Server) WatchProject(ctx context.Context) error {
 		snapshot = next
 		s.events.publish(liveEvent{
 			Type:        "project_changed",
-			ProjectRoot: s.projectRoot,
+			ProjectID:   projectID,
+			ProjectName: projectName,
+			ProjectRoot: projectRoot,
 			Activities:  activities,
 			Timestamp:   now,
 		})

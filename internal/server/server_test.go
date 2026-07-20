@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -232,6 +233,131 @@ func TestTaskTextAndProposalEndpoints(t *testing.T) {
 	if conflict.StatusCode != http.StatusConflict {
 		t.Errorf("stale proposal status = %d, want 409", conflict.StatusCode)
 	}
+}
+
+func TestProjectRegistryAPIAndDisconnectedState(t *testing.T) {
+	root := t.TempDir()
+	projectRoot := filepath.Join(root, "alpha")
+	changeDir := filepath.Join(projectRoot, "openspec", "changes", "demo")
+	if err := os.MkdirAll(changeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "openspec", "config.yaml"), []byte("schema: spec-driven\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(changeDir, "proposal.md"), []byte("# Demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	app, err := NewPersistent(filepath.Join(root, "registry.json"), "", logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(app.Handler())
+	defer server.Close()
+
+	addBody, _ := json.Marshal(addProjectRequest{Path: projectRoot})
+	added := postJSON(t, server.URL+"/api/projects", addBody)
+	if added.StatusCode != http.StatusCreated {
+		t.Fatalf("add status = %d, want 201", added.StatusCode)
+	}
+	var project registeredProjectView
+	if err := json.NewDecoder(added.Body).Decode(&project); err != nil {
+		t.Fatal(err)
+	}
+	added.Body.Close()
+	if !project.Connected || project.Name != "alpha" || len(project.Changes) != 1 {
+		t.Fatalf("added project = %+v", project)
+	}
+
+	detail, err := http.Get(server.URL + "/api/projects/" + project.ID + "/changes/demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer detail.Body.Close()
+	if detail.StatusCode != http.StatusOK {
+		t.Fatalf("registered detail status = %d, want 200", detail.StatusCode)
+	}
+
+	disconnectedPath := projectRoot + "-offline"
+	if err := os.Rename(projectRoot, disconnectedPath); err != nil {
+		t.Fatal(err)
+	}
+	projectsResponse, err := http.Get(server.URL + "/api/projects")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var list struct {
+		Projects []registeredProjectView `json:"projects"`
+	}
+	if err := json.NewDecoder(projectsResponse.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	projectsResponse.Body.Close()
+	if len(list.Projects) != 1 || list.Projects[0].Connected {
+		t.Fatalf("disconnected projects = %+v", list.Projects)
+	}
+
+	request, _ := http.NewRequest(http.MethodDelete, server.URL+"/api/projects/"+project.ID, nil)
+	removed, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed.Body.Close()
+	if removed.StatusCode != http.StatusNoContent {
+		t.Fatalf("remove status = %d, want 204", removed.StatusCode)
+	}
+}
+
+func TestProjectWatcherStartsAndStopsWithRegistry(t *testing.T) {
+	root := t.TempDir()
+	projectRoot := filepath.Join(root, "watched")
+	if err := os.MkdirAll(filepath.Join(projectRoot, "openspec", "changes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	app, err := NewPersistent(filepath.Join(root, "registry.json"), "", logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go app.WatchProjects(ctx)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		app.watchMu.Lock()
+		ready := app.watchCtx != nil
+		app.watchMu.Unlock()
+		if ready {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	project, err := app.registry.Add(projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.startProjectWatcher(project)
+	waitForWatcherCount(t, app, 1)
+	app.stopProjectWatcher(project.ID)
+	waitForWatcherCount(t, app, 0)
+}
+
+func waitForWatcherCount(t *testing.T, app *Server, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		app.watchMu.Lock()
+		got := len(app.watchers)
+		app.watchMu.Unlock()
+		if got == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("watcher count did not become %d", want)
 }
 
 func postJSON(t *testing.T, url string, body []byte) *http.Response {
