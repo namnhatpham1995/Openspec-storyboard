@@ -53,6 +53,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/projects/current", s.handleCurrentProject)
 	mux.HandleFunc("GET /api/changes/{name}", s.handleChangeDetail)
 	mux.HandleFunc("POST /api/changes/{name}/tasks/{id}/toggle", s.handleTaskToggle)
+	mux.HandleFunc("PUT /api/changes/{name}/tasks/{id}/text", s.handleTaskText)
+	mux.HandleFunc("PUT /api/changes/{name}/artifacts/proposal", s.handleProposalText)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	return s.logRequests(mux)
 }
@@ -102,6 +104,54 @@ func (s *Server) handleTaskToggle(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+type taskTextRequest struct {
+	Text    string               `json:"text"`
+	Version openspec.FileVersion `json:"version"`
+}
+
+func (s *Server) handleTaskText(w http.ResponseWriter, r *http.Request) {
+	if s.writeRoot == "" {
+		writeAPIError(w, http.StatusInternalServerError, "writes_unavailable", "writes are unavailable for this project source")
+		return
+	}
+	var request taskTextRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	result, err := openspec.UpdateTaskTextFile(
+		s.writeRoot, r.PathValue("name"), r.PathValue("id"), request.Text, request.Version,
+	)
+	if err != nil {
+		s.writeReadError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+type proposalTextRequest struct {
+	Content string               `json:"content"`
+	Version openspec.FileVersion `json:"version"`
+}
+
+func (s *Server) handleProposalText(w http.ResponseWriter, r *http.Request) {
+	if s.writeRoot == "" {
+		writeAPIError(w, http.StatusInternalServerError, "writes_unavailable", "writes are unavailable for this project source")
+		return
+	}
+	var request proposalTextRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	result, err := openspec.SaveProposalFile(s.writeRoot, r.PathValue("name"), request.Content, request.Version)
+	if err != nil {
+		s.writeReadError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) writeReadError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, openspec.ErrChangeNotFound):
@@ -110,10 +160,14 @@ func (s *Server) writeReadError(w http.ResponseWriter, err error) {
 		writeAPIError(w, http.StatusUnprocessableEntity, "not_openspec_project", err.Error())
 	case errors.Is(err, openspec.ErrTaskNotFound):
 		writeAPIError(w, http.StatusNotFound, "task_not_found", err.Error())
+	case errors.Is(err, openspec.ErrArtifactNotFound):
+		writeAPIError(w, http.StatusNotFound, "artifact_not_found", err.Error())
 	case errors.Is(err, openspec.ErrConflict):
 		writeAPIError(w, http.StatusConflict, "file_conflict", err.Error())
 	case errors.Is(err, openspec.ErrInvalidTaskLine):
 		writeAPIError(w, http.StatusUnprocessableEntity, "invalid_task_line", err.Error())
+	case errors.Is(err, openspec.ErrInvalidTaskText):
+		writeAPIError(w, http.StatusUnprocessableEntity, "invalid_task_text", err.Error())
 	default:
 		s.logger.Error("reading OpenSpec project", "error", err)
 		writeAPIError(w, http.StatusInternalServerError, "read_failed", "could not read the OpenSpec project")

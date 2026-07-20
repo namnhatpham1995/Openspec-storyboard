@@ -58,3 +58,12 @@ export interface ToggleResult {
   task: Task
   version: FileVersion
 }
+
+export interface TaskTextResult {
+  task: Task
+  version: FileVersion
+}
+
+export interface ArtifactWriteResult {
+  artifact: ArtifactFile
+}

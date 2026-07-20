@@ -44,6 +44,40 @@ func TestToggleCheckboxLineRejectsInvalidTarget(t *testing.T) {
 	}
 }
 
+func TestReplaceTaskTextLinePreservesSurroundingBytes(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		line int
+		text string
+		want string
+	}{
+		{"unchecked LF", "intro\n- [ ] 1.1 Old text\nend\n", 2, "New text", "intro\n- [ ] 1.1 New text\nend\n"},
+		{"checked CRLF", "\t-   [x]\t2.4\tOld text  \r\n", 1, "Rewritten", "\t-   [x]\t2.4\tRewritten  \r\n"},
+		{"without id", "  - [ ] old text\n", 1, "new text", "  - [ ] new text\n"},
+		{"empty replacement", "- [X] 1.2 old\t\n", 1, "", "- [X] 1.2 \t\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ReplaceTaskTextLine([]byte(tt.in), tt.line, tt.text)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, []byte(tt.want)) {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReplaceTaskTextLineRejectsStructureChanges(t *testing.T) {
+	for _, text := range []string{"two\nlines", "two\rlines"} {
+		if _, err := ReplaceTaskTextLine([]byte("- [ ] 1.1 old\n"), 1, text); !errors.Is(err, ErrInvalidTaskText) {
+			t.Errorf("text %q: error = %v, want ErrInvalidTaskText", text, err)
+		}
+	}
+}
+
 func TestToggleTaskFileAndConflict(t *testing.T) {
 	root := t.TempDir()
 	changeDir := filepath.Join(root, "openspec", "changes", "demo")
@@ -97,5 +131,67 @@ func TestToggleTaskFileRejectsMissingOrDuplicateTask(t *testing.T) {
 		if _, err := ToggleTaskFile(root, "demo", id, base); !errors.Is(err, ErrTaskNotFound) {
 			t.Errorf("id %q: error = %v, want ErrTaskNotFound", id, err)
 		}
+	}
+}
+
+func TestUpdateTaskTextFileAndConflict(t *testing.T) {
+	root := t.TempDir()
+	changeDir := filepath.Join(root, "openspec", "changes", "demo")
+	if err := os.MkdirAll(changeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(changeDir, "tasks.md")
+	original := []byte("## Work\r\n\t- [x] 1.1 Keep this spacing  \r\n")
+	if err := os.WriteFile(path, original, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Stat(path)
+	base := versionFor(original, info.ModTime())
+
+	result, err := UpdateTaskTextFile(root, "demo", "1.1", "Edited description", base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Task.Text != "Edited description" || !result.Task.Checked || result.Version.Hash == base.Hash {
+		t.Errorf("result = %+v", result)
+	}
+	want := []byte("## Work\r\n\t- [x] 1.1 Edited description  \r\n")
+	got, _ := os.ReadFile(path)
+	if !bytes.Equal(got, want) {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+	if _, err := UpdateTaskTextFile(root, "demo", "1.1", "stale", base); !errors.Is(err, ErrConflict) {
+		t.Errorf("stale edit error = %v, want ErrConflict", err)
+	}
+}
+
+func TestSaveProposalFileAndConflict(t *testing.T) {
+	root := t.TempDir()
+	changeDir := filepath.Join(root, "openspec", "changes", "demo")
+	if err := os.MkdirAll(changeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(changeDir, "proposal.md")
+	original := []byte("# Original\r\n\r\nKeep format.\r\n")
+	if err := os.WriteFile(path, original, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Stat(path)
+	base := versionFor(original, info.ModTime())
+	updated := "# Edited\r\n\r\nRaw markdown stays raw.\r\n"
+
+	result, err := SaveProposalFile(root, "demo", updated, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Artifact.Content != updated || result.Artifact.Version.Hash == base.Hash {
+		t.Errorf("result = %+v", result)
+	}
+	got, _ := os.ReadFile(path)
+	if !bytes.Equal(got, []byte(updated)) {
+		t.Errorf("file = %q, want %q", got, updated)
+	}
+	if _, err := SaveProposalFile(root, "demo", "stale", base); !errors.Is(err, ErrConflict) {
+		t.Errorf("stale save error = %v, want ErrConflict", err)
 	}
 }

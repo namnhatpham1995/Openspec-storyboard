@@ -1,4 +1,4 @@
-import type { ChangeDetail, FileVersion, Project, ToggleResult } from './types'
+import type { ArtifactWriteResult, ChangeDetail, FileVersion, Project, TaskTextResult, ToggleResult } from './types'
 
 export class APIError extends Error {
   readonly status: number
@@ -41,5 +41,25 @@ export const toggleTask = (changeName: string, taskID: string, version: FileVers
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ version }),
+    },
+  )
+
+export const updateTaskText = (changeName: string, taskID: string, text: string, version: FileVersion) =>
+  requestJSON<TaskTextResult>(
+    `/api/changes/${encodeURIComponent(changeName)}/tasks/${encodeURIComponent(taskID)}/text`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, version }),
+    },
+  )
+
+export const updateProposal = (changeName: string, content: string, version: FileVersion) =>
+  requestJSON<ArtifactWriteResult>(
+    `/api/changes/${encodeURIComponent(changeName)}/artifacts/proposal`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, version }),
     },
   )

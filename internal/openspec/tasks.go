@@ -11,7 +11,7 @@ var groupHeadingPattern = regexp.MustCompile(`^##\s+(.+?)\s*$`)
 
 // taskLinePattern matches a checkbox line, e.g. "- [ ] 1.2 Do the thing"
 // or "- [x] Do the thing" (an id prefix is optional).
-var taskLinePattern = regexp.MustCompile(`^-\s\[([ xX])\]\s+(?:(\d+(?:\.\d+)*)\s+)?(.*?)\s*$`)
+var taskLinePattern = regexp.MustCompile(`^[ \t]*-[ \t]+\[([ xX])\][ \t]+(?:(\d+(?:\.\d+)*)[ \t]+)?(.*?)[ \t]*$`)
 
 // ParseTasksDoc parses the contents of a tasks.md file into task groups.
 //
