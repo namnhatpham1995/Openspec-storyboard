@@ -2,6 +2,8 @@ package server
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"io/fs"
@@ -11,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"storyboard/internal/openspec"
 )
@@ -170,6 +173,67 @@ func TestTaskToggleRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestTaskTextAndProposalEndpoints(t *testing.T) {
+	root := t.TempDir()
+	changeDir := filepath.Join(root, "openspec", "changes", "demo")
+	if err := os.MkdirAll(changeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "openspec", "config.yaml"), []byte("schema: spec-driven\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	proposal := []byte("# Original\n")
+	tasks := []byte("## Work\n- [ ] 1.1 Original task\n")
+	if err := os.WriteFile(filepath.Join(changeDir, "proposal.md"), proposal, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(changeDir, "tasks.md"), tasks, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	proposalInfo, _ := os.Stat(filepath.Join(changeDir, "proposal.md"))
+	tasksInfo, _ := os.Stat(filepath.Join(changeDir, "tasks.md"))
+	proposalVersion := testVersion(proposal, proposalInfo.ModTime())
+	tasksVersion := testVersion(tasks, tasksInfo.ModTime())
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := httptest.NewServer(New(root, logger).Handler())
+	defer server.Close()
+
+	taskBody, _ := json.Marshal(taskTextRequest{Text: "Edited task", Version: tasksVersion})
+	taskResponse := putJSON(t, server.URL+"/api/changes/demo/tasks/1.1/text", taskBody)
+	defer taskResponse.Body.Close()
+	if taskResponse.StatusCode != http.StatusOK {
+		t.Fatalf("task text status = %d, want 200", taskResponse.StatusCode)
+	}
+	var taskResult openspec.TaskTextResult
+	if err := json.NewDecoder(taskResponse.Body).Decode(&taskResult); err != nil {
+		t.Fatal(err)
+	}
+	if taskResult.Task.Text != "Edited task" || taskResult.Version.Hash == tasksVersion.Hash {
+		t.Errorf("task result = %+v", taskResult)
+	}
+
+	proposalBody, _ := json.Marshal(proposalTextRequest{Content: "# Edited\n", Version: proposalVersion})
+	proposalResponse := putJSON(t, server.URL+"/api/changes/demo/artifacts/proposal", proposalBody)
+	defer proposalResponse.Body.Close()
+	if proposalResponse.StatusCode != http.StatusOK {
+		t.Fatalf("proposal status = %d, want 200", proposalResponse.StatusCode)
+	}
+	var proposalResult openspec.ArtifactWriteResult
+	if err := json.NewDecoder(proposalResponse.Body).Decode(&proposalResult); err != nil {
+		t.Fatal(err)
+	}
+	if proposalResult.Artifact.Content != "# Edited\n" || proposalResult.Artifact.Version.Hash == proposalVersion.Hash {
+		t.Errorf("proposal result = %+v", proposalResult)
+	}
+
+	conflict := putJSON(t, server.URL+"/api/changes/demo/artifacts/proposal", proposalBody)
+	defer conflict.Body.Close()
+	if conflict.StatusCode != http.StatusConflict {
+		t.Errorf("stale proposal status = %d, want 409", conflict.StatusCode)
+	}
+}
+
 func postJSON(t *testing.T, url string, body []byte) *http.Response {
 	t.Helper()
 	response, err := http.Post(url, "application/json", bytes.NewReader(body))
@@ -177,4 +241,23 @@ func postJSON(t *testing.T, url string, body []byte) *http.Response {
 		t.Fatal(err)
 	}
 	return response
+}
+
+func putJSON(t *testing.T, url string, body []byte) *http.Response {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodPut, url, bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return response
+}
+
+func testVersion(content []byte, modTime time.Time) openspec.FileVersion {
+	sum := sha256.Sum256(content)
+	return openspec.FileVersion{ModTime: modTime, Hash: hex.EncodeToString(sum[:])}
 }

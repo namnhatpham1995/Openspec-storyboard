@@ -14,9 +14,17 @@ var ErrChangeNotFound = errors.New("openspec change not found")
 // exactly one task in the change's tasks.md file.
 var ErrTaskNotFound = errors.New("openspec task not found")
 
+// ErrArtifactNotFound is returned when a requested editable artifact does not
+// exist for the change.
+var ErrArtifactNotFound = errors.New("openspec artifact not found")
+
 // ErrConflict is returned when a write is based on a stale file version.
 var ErrConflict = errors.New("file changed externally")
 
 // ErrInvalidTaskLine is returned when line surgery is asked to modify a line
 // that does not contain a recognizable task checkbox.
 var ErrInvalidTaskLine = errors.New("line does not contain a task checkbox")
+
+// ErrInvalidTaskText is returned when replacement text cannot fit on one task
+// line without changing the surrounding markdown structure.
+var ErrInvalidTaskText = errors.New("task text must be a single line")

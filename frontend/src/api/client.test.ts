@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { APIError, toggleTask } from './client'
+import { APIError, toggleTask, updateProposal, updateTaskText } from './client'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -28,5 +28,36 @@ describe('toggleTask', () => {
     await expect(toggleTask('demo', '1.1', { modTime: '', hash: 'old' })).rejects.toEqual(
       expect.objectContaining<Partial<APIError>>({ status: 409, code: 'file_conflict' }),
     )
+  })
+})
+
+describe('text writes', () => {
+  it('puts task text with its base version', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      task: { id: '1.1', text: 'Edited', checked: false, line: 2 },
+      version: { modTime: '2026-01-01T00:00:01Z', hash: 'new' },
+    }), { status: 200 }))
+    const version = { modTime: '2026-01-01T00:00:00Z', hash: 'old' }
+
+    await updateTaskText('demo', '1.1', 'Edited', version)
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/changes/demo/tasks/1.1/text', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ text: 'Edited', version }),
+    }))
+  })
+
+  it('puts raw proposal markdown with its base version', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      artifact: { kind: 'proposal', path: 'proposal.md', content: '# Edited', version: { modTime: '', hash: 'new' } },
+    }), { status: 200 }))
+    const version = { modTime: '2026-01-01T00:00:00Z', hash: 'old' }
+
+    await updateProposal('demo', '# Edited', version)
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/changes/demo/artifacts/proposal', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ content: '# Edited', version }),
+    }))
   })
 })

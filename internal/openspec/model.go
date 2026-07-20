@@ -108,3 +108,14 @@ type ToggleResult struct {
 	Task    Task        `json:"task"`
 	Version FileVersion `json:"version"`
 }
+
+// TaskTextResult is returned after a successful task-description write.
+type TaskTextResult struct {
+	Task    Task        `json:"task"`
+	Version FileVersion `json:"version"`
+}
+
+// ArtifactWriteResult is returned after a successful full-text artifact write.
+type ArtifactWriteResult struct {
+	Artifact Artifact `json:"artifact"`
+}

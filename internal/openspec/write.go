@@ -13,7 +13,8 @@ import (
 	"time"
 )
 
-var checkboxPrefixPattern = regexp.MustCompile(`^-\s+\[([ xX])\]`)
+var checkboxPrefixPattern = regexp.MustCompile(`^[ \t]*-[ \t]+\[([ xX])\]`)
+var taskTextPrefixPattern = regexp.MustCompile(`^[ \t]*-[ \t]+\[[ xX]\][ \t]+(?:\d+(?:\.\d+)*[ \t]+)?`)
 
 // ToggleCheckboxLine flips the checkbox on a 1-based source line while
 // preserving every other byte, including CRLF/LF endings and trailing data.
@@ -35,6 +36,34 @@ func ToggleCheckboxLine(content []byte, line int) ([]byte, error) {
 	} else {
 		updated[stateIndex] = ' '
 	}
+	return updated, nil
+}
+
+// ReplaceTaskTextLine replaces only the description portion of one checkbox
+// line. Indentation, checkbox state, id prefix, spacing, trailing whitespace,
+// line endings, and every other source byte are preserved.
+func ReplaceTaskTextLine(content []byte, line int, text string) ([]byte, error) {
+	if bytes.ContainsAny([]byte(text), "\r\n") {
+		return nil, ErrInvalidTaskText
+	}
+	start, end, ok := lineRange(content, line)
+	if !ok {
+		return nil, ErrInvalidTaskLine
+	}
+	lineBytes := content[start:end]
+	prefix := taskTextPrefixPattern.FindIndex(lineBytes)
+	if prefix == nil {
+		return nil, ErrInvalidTaskLine
+	}
+
+	suffixStart := len(lineBytes)
+	for suffixStart > prefix[1] && (lineBytes[suffixStart-1] == ' ' || lineBytes[suffixStart-1] == '\t') {
+		suffixStart--
+	}
+	updated := make([]byte, 0, len(content)-suffixStart+prefix[1]+len(text))
+	updated = append(updated, content[:start+prefix[1]]...)
+	updated = append(updated, text...)
+	updated = append(updated, content[start+suffixStart:]...)
 	return updated, nil
 }
 
@@ -78,6 +107,76 @@ func ToggleTaskFile(projectRoot, changeName, taskID string, base FileVersion) (*
 	}
 	task.Checked = !task.Checked
 	return &ToggleResult{Task: task, Version: versionFor(updated, newInfo.ModTime())}, nil
+}
+
+// UpdateTaskTextFile verifies the caller's version and atomically replaces
+// only one task's description. Disk state always wins on conflict.
+func UpdateTaskTextFile(projectRoot, changeName, taskID, text string, base FileVersion) (*TaskTextResult, error) {
+	changeDir, err := resolveChangeDir(projectRoot, changeName)
+	if err != nil {
+		return nil, err
+	}
+	tasksPath := filepath.Join(changeDir, "tasks.md")
+	content, info, err := readVersionedFile(tasksPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrTaskNotFound
+		}
+		return nil, fmt.Errorf("reading tasks.md: %w", err)
+	}
+	if !sameVersion(versionFor(content, info.ModTime()), base) {
+		return nil, ErrConflict
+	}
+
+	task, found := findUniqueTask(ParseTasksDoc(content), taskID)
+	if !found {
+		return nil, ErrTaskNotFound
+	}
+	updated, err := ReplaceTaskTextLine(content, task.Line, text)
+	if err != nil {
+		return nil, err
+	}
+	if err := atomicReplace(tasksPath, updated, info.Mode(), base); err != nil {
+		return nil, fmt.Errorf("writing tasks.md: %w", err)
+	}
+	newInfo, err := os.Stat(tasksPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading updated tasks.md version: %w", err)
+	}
+	task.Text = text
+	return &TaskTextResult{Task: task, Version: versionFor(updated, newInfo.ModTime())}, nil
+}
+
+// SaveProposalFile replaces proposal.md verbatim after checking its base
+// version and uses the same atomic, disk-wins write path as task mutations.
+func SaveProposalFile(projectRoot, changeName, content string, base FileVersion) (*ArtifactWriteResult, error) {
+	changeDir, err := resolveChangeDir(projectRoot, changeName)
+	if err != nil {
+		return nil, err
+	}
+	proposalPath := filepath.Join(changeDir, "proposal.md")
+	current, info, err := readVersionedFile(proposalPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrArtifactNotFound
+		}
+		return nil, fmt.Errorf("reading proposal.md: %w", err)
+	}
+	if !sameVersion(versionFor(current, info.ModTime()), base) {
+		return nil, ErrConflict
+	}
+	updated := []byte(content)
+	if err := atomicReplace(proposalPath, updated, info.Mode(), base); err != nil {
+		return nil, fmt.Errorf("writing proposal.md: %w", err)
+	}
+	newInfo, err := os.Stat(proposalPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading updated proposal.md version: %w", err)
+	}
+	return &ArtifactWriteResult{Artifact: Artifact{
+		Kind: "proposal", Path: "proposal.md", Content: content,
+		Version: versionFor(updated, newInfo.ModTime()),
+	}}, nil
 }
 
 func resolveChangeDir(projectRoot, changeName string) (string, error) {

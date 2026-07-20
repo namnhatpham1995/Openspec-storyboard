@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
 import { Link, useParams } from 'react-router-dom'
-import { APIError, getChangeDetail, toggleTask } from '../api/client'
+import { APIError, getChangeDetail, toggleTask, updateProposal, updateTaskText } from '../api/client'
 import type { ArtifactFile, FileVersion, Task } from '../api/types'
 import { ArtifactPipeline } from '../components/ArtifactPipeline'
 import { ErrorState } from '../components/ErrorState'
@@ -19,32 +19,54 @@ export function ChangeDetailPage() {
   })
   const [selectedPath, setSelectedPath] = useState('')
   const [notice, setNotice] = useState<{ kind: 'conflict' | 'error'; message: string } | null>(null)
+  const [writeReset, setWriteReset] = useState(0)
+
+  const refreshFromDisk = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['change', name] }),
+      queryClient.invalidateQueries({ queryKey: ['project', 'current'] }),
+    ])
+  }
+  const writeSucceeded = async () => {
+    setNotice(null)
+    await refreshFromDisk()
+  }
+  const writeFailed = async (error: unknown, fallback: string) => {
+    if (error instanceof APIError && error.status === 409) {
+      setNotice({ kind: 'conflict', message: 'File changed externally. Reloaded the latest version from disk.' })
+      setWriteReset((current) => current + 1)
+      await refreshFromDisk()
+      return
+    }
+    setNotice({ kind: 'error', message: error instanceof Error ? error.message : fallback })
+  }
+  const externalConflict = () => {
+    setNotice({ kind: 'conflict', message: 'File changed externally. Reloaded the latest version from disk.' })
+    setWriteReset((current) => current + 1)
+  }
+
+  const toggle = useMutation({
+    mutationFn: ({ taskID, version }: { taskID: string; version: FileVersion }) =>
+      toggleTask(name, taskID, version),
+    onSuccess: writeSucceeded,
+    onError: (error) => writeFailed(error, 'Could not update the task.'),
+  })
+  const taskText = useMutation({
+    mutationFn: ({ taskID, text, version }: { taskID: string; text: string; version: FileVersion }) =>
+      updateTaskText(name, taskID, text, version),
+    onSuccess: writeSucceeded,
+    onError: (error) => writeFailed(error, 'Could not update the task text.'),
+  })
+  const proposalText = useMutation({
+    mutationFn: ({ content, version }: { content: string; version: FileVersion }) =>
+      updateProposal(name, content, version),
+    onSuccess: writeSucceeded,
+    onError: (error) => writeFailed(error, 'Could not update the proposal.'),
+  })
 
   const artifactFiles = detail.data?.artifactFiles
   const selectedArtifact = artifactFiles?.find((artifact) => artifact.path === selectedPath) ?? artifactFiles?.[0]
   const tasksVersion = artifactFiles?.find((artifact) => artifact.path === 'tasks.md')?.version
-  const toggle = useMutation({
-    mutationFn: ({ taskID, version }: { taskID: string; version: FileVersion }) =>
-      toggleTask(name, taskID, version),
-    onSuccess: async () => {
-      setNotice(null)
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['change', name] }),
-        queryClient.invalidateQueries({ queryKey: ['project', 'current'] }),
-      ])
-    },
-    onError: async (error) => {
-      if (error instanceof APIError && error.status === 409) {
-        setNotice({ kind: 'conflict', message: 'File changed externally. Reloaded the latest version from disk.' })
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ['change', name] }),
-          queryClient.invalidateQueries({ queryKey: ['project', 'current'] }),
-        ])
-        return
-      }
-      setNotice({ kind: 'error', message: error instanceof Error ? error.message : 'Could not update the task.' })
-    },
-  })
 
   useEffect(() => {
     if (!selectedPath && artifactFiles?.[0]) setSelectedPath(artifactFiles[0].path)
@@ -52,6 +74,8 @@ export function ChangeDetailPage() {
 
   if (detail.isPending) return <DetailSkeleton />
   if (detail.isError) return <ErrorState title="Change not found" message={detail.error.message} />
+
+  const taskWritePending = toggle.isPending || taskText.isPending
 
   return (
     <article className="detail-page">
@@ -86,11 +110,15 @@ export function ChangeDetailPage() {
               <ul>
                 {(group.tasks ?? []).map((task) => (
                   <TaskRow
-                    key={`${task.id}-${task.line}`}
+                    key={`${task.id}-${task.line}-${writeReset}`}
                     task={task}
-                    disabled={!tasksVersion || toggle.isPending}
-                    pending={toggle.isPending && toggle.variables?.taskID === task.id}
+                    version={tasksVersion}
+                    disabled={!tasksVersion || taskWritePending}
+                    pendingToggle={toggle.isPending && toggle.variables?.taskID === task.id}
+                    pendingText={taskText.isPending && taskText.variables?.taskID === task.id}
                     onToggle={(taskID) => tasksVersion && toggle.mutate({ taskID, version: tasksVersion })}
+                    onSave={(taskID, text, version) => taskText.mutateAsync({ taskID, text, version }).then(() => undefined)}
+                    onExternalChange={externalConflict}
                   />
                 ))}
               </ul>
@@ -114,7 +142,17 @@ export function ChangeDetailPage() {
               </button>
             ))}
           </div>
-          {selectedArtifact ? <MarkdownArtifact artifact={selectedArtifact} /> : <p className="panel-empty">No artifact files found.</p>}
+          {selectedArtifact ? (
+            <MarkdownArtifact
+              key={`${selectedArtifact.path}-${writeReset}`}
+              artifact={selectedArtifact}
+              saving={proposalText.isPending}
+              onSave={selectedArtifact.path === 'proposal.md'
+                ? (content, version) => proposalText.mutateAsync({ content, version }).then(() => undefined)
+                : undefined}
+              onExternalChange={externalConflict}
+            />
+          ) : <p className="panel-empty">No artifact files found.</p>}
         </section>
       </div>
     </article>
@@ -123,50 +161,197 @@ export function ChangeDetailPage() {
 
 function TaskRow({
   task,
+  version,
   disabled,
-  pending,
+  pendingToggle,
+  pendingText,
   onToggle,
+  onSave,
+  onExternalChange,
 }: {
   task: Task
+  version?: FileVersion
   disabled: boolean
-  pending: boolean
+  pendingToggle: boolean
+  pendingText: boolean
   onToggle: (taskID: string) => void
+  onSave: (taskID: string, text: string, version: FileVersion) => Promise<void>
+  onExternalChange: () => void
 }) {
   const onArrowKeyDown = useArrowNavigation('[data-task-row]')
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(task.text)
+  const [editBaseText, setEditBaseText] = useState(task.text)
+  const [editVersion, setEditVersion] = useState<FileVersion | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (editing) inputRef.current?.select()
+  }, [editing])
+  useEffect(() => {
+    if (!editing) setDraft(task.text)
+    if (editing && !pendingText && task.text !== editBaseText) {
+      setDraft(task.text)
+      setEditing(false)
+      onExternalChange()
+    }
+  }, [editBaseText, editing, onExternalChange, pendingText, task.text])
+
+  const startEditing = () => {
+    if (!version) return
+    setDraft(task.text)
+    setEditBaseText(task.text)
+    setEditVersion(version)
+    setEditing(true)
+  }
+
+  const cancel = () => {
+    setDraft(task.text)
+    setEditing(false)
+  }
+  const save = async () => {
+    if (!task.id || !editVersion || draft === editBaseText) {
+      setEditing(false)
+      return
+    }
+    try {
+      await onSave(task.id, draft, editVersion)
+      setEditing(false)
+    } catch {
+      // The mutation displays the API or conflict notice; keep the draft open.
+    }
+  }
   const onKeyDown = (event: React.KeyboardEvent<HTMLLIElement>) => {
+    if (editing) return
     if (event.key === ' ' && !disabled && task.id) {
       event.preventDefault()
       onToggle(task.id)
       return
     }
+    if (event.key === 'Enter' && !disabled && task.id) {
+      event.preventDefault()
+      startEditing()
+      return
+    }
     onArrowKeyDown(event)
   }
+
   return (
-    <li className={task.checked ? 'is-checked' : ''} tabIndex={0} data-task-row onKeyDown={onKeyDown} aria-busy={pending}>
+    <li className={`${task.checked ? 'is-checked' : ''} ${editing ? 'is-editing' : ''}`} tabIndex={editing ? -1 : 0} data-task-row onKeyDown={onKeyDown} aria-busy={pendingToggle || pendingText}>
       <button
         className="task-glyph mono"
         type="button"
         tabIndex={-1}
-        disabled={disabled || !task.id}
+        disabled={disabled || !task.id || editing}
         onClick={() => task.id && onToggle(task.id)}
         aria-label={`${task.checked ? 'Mark incomplete' : 'Mark complete'}: task ${task.id || 'without id'}`}
       >
-        {pending ? '[·]' : task.checked ? '[x]' : '[ ]'}
+        {pendingToggle ? '[·]' : task.checked ? '[x]' : '[ ]'}
       </button>
       {task.id && <span className="task-id mono">{task.id}</span>}
-      <span>{task.text}</span>
+      {editing ? (
+        <div className="task-text-editor">
+          <input
+            ref={inputRef}
+            value={draft}
+            disabled={pendingText}
+            aria-label={`Edit task ${task.id}`}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              event.stopPropagation()
+              if (event.key === 'Escape') cancel()
+              if (event.key === 'Enter') void save()
+            }}
+          />
+          <button type="button" onClick={() => void save()} disabled={pendingText}>{pendingText ? 'Saving…' : 'Save'}</button>
+          <button type="button" onClick={cancel} disabled={pendingText}>Cancel</button>
+        </div>
+      ) : (
+        <button className="task-text-button" type="button" tabIndex={-1} disabled={disabled || !task.id} onClick={startEditing}>
+          <span>{task.text || 'Empty task text'}</span><small>Edit</small>
+        </button>
+      )}
     </li>
   )
 }
 
-function MarkdownArtifact({ artifact }: { artifact: ArtifactFile }) {
+function MarkdownArtifact({
+  artifact,
+  saving,
+  onSave,
+  onExternalChange,
+}: {
+  artifact: ArtifactFile
+  saving: boolean
+  onSave?: (content: string, version: FileVersion) => Promise<void>
+  onExternalChange: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(artifact.content)
+  const [editVersion, setEditVersion] = useState(artifact.version)
+  const previousHash = useRef(artifact.version.hash)
+
+  useEffect(() => {
+    if (previousHash.current === artifact.version.hash) return
+    previousHash.current = artifact.version.hash
+    setDraft(artifact.content)
+    if (editing && !saving) onExternalChange()
+    setEditing(false)
+  }, [artifact.content, artifact.version.hash, editing, onExternalChange, saving])
+
+  const startEditing = () => {
+    setDraft(artifact.content)
+    setEditVersion(artifact.version)
+    setEditing(true)
+  }
+
+  const cancel = () => {
+    setDraft(artifact.content)
+    setEditing(false)
+  }
+  const save = async () => {
+    if (!onSave || draft === artifact.content) {
+      setEditing(false)
+      return
+    }
+    try {
+      await onSave(draft, editVersion)
+      setEditing(false)
+    } catch {
+      // The mutation displays the API or conflict notice; keep the draft open.
+    }
+  }
+
   return (
     <div className="markdown-wrap">
       <div className="artifact-file-meta">
         <span className="mono">{artifact.path}</span>
-        <span title={artifact.version.hash}>rev {artifact.version.hash.slice(0, 7)}</span>
+        <span className="artifact-file-actions">
+          <span title={artifact.version.hash}>rev {artifact.version.hash.slice(0, 7)}</span>
+          {onSave && !editing && <button type="button" onClick={startEditing}>Edit proposal</button>}
+        </span>
       </div>
-      <div className="markdown-body"><ReactMarkdown>{artifact.content}</ReactMarkdown></div>
+      {editing ? (
+        <div className="proposal-editor">
+          <textarea
+            value={draft}
+            disabled={saving}
+            aria-label="Proposal markdown"
+            spellCheck={false}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') cancel()
+            }}
+          />
+          <div className="editor-actions">
+            <span>Raw Markdown · Esc cancels</span>
+            <button type="button" onClick={cancel} disabled={saving}>Cancel</button>
+            <button className="is-primary" type="button" onClick={() => void save()} disabled={saving}>{saving ? 'Saving…' : 'Save proposal'}</button>
+          </div>
+        </div>
+      ) : (
+        <div className="markdown-body"><ReactMarkdown>{artifact.content}</ReactMarkdown></div>
+      )}
     </div>
   )
 }
