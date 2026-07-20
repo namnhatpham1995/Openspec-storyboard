@@ -3,12 +3,54 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version to build and tag, e.g. v1.2.3"
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
+  prepare:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate version input
+        shell: bash
+        run: |
+          version="${{ inputs.version }}"
+          if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
+            echo "::error::Invalid version '$version' — must match v* (e.g. v1.2.3)"
+            exit 1
+          fi
+      - name: Check tag does not already exist
+        shell: bash
+        run: |
+          version="${{ inputs.version }}"
+          if git ls-remote --tags origin "refs/tags/$version" | grep -q "$version"; then
+            echo "::error::Tag '$version' already exists on origin"
+            exit 1
+          fi
+      - name: Create and push tag
+        shell: bash
+        run: |
+          version="${{ inputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$version"
+          git push origin "$version"
+      - id: resolve
+        run: echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: [prepare]
+    if: always() && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
     strategy:
       matrix:
         include:
@@ -27,6 +69,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.version || github.ref_name }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -37,14 +81,15 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Build and verify release binary
         shell: bash
-        run: go run ./scripts/release --version "${GITHUB_REF_NAME}" --target "${{ matrix.target }}"
+        run: go run ./scripts/release --version "${{ needs.prepare.outputs.version || github.ref_name }}" --target "${{ matrix.target }}"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: dist/${{ matrix.artifact }}
 
   publish:
-    needs: build
+    needs: [prepare, build]
+    if: always() && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -53,5 +98,6 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.prepare.outputs.version || github.ref_name }}
           files: dist/*
           generate_release_notes: true
