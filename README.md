@@ -109,10 +109,6 @@ go run ./scripts/release --version v1.0.0
 
 Artifacts are written to `dist/` for Windows x64, macOS Intel, macOS Apple Silicon, and Linux x64. A matching native build is executed with `--version` as part of the release command. Pushing a `v*` tag runs native GitHub-hosted builds and publishes their verified artifacts as a GitHub release.
 
-## Portfolio description
-
-> Built a portable local-first OpenSpec project dashboard with Go, React, and TypeScript. Designed byte-preserving atomic markdown edits with optimistic concurrency, recursive filesystem watching with debounced Server-Sent Events, a multi-project registry, and a cross-platform single-binary release pipeline with an embedded responsive SPA.
-
 ## Scope
 
 Storyboard edits existing changes; it does not replace the OpenSpec CLI for creating, validating, archiving, or applying changes. It has no authentication or remote multi-user mode because the server is intentionally loopback-only.
