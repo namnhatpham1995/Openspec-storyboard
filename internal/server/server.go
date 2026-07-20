@@ -97,6 +97,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/changes/{name}/tasks/{id}/text", s.handleTaskText)
 	mux.HandleFunc("PUT /api/changes/{name}/artifacts/proposal", s.handleProposalText)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
+	mux.Handle("/", spaHandler())
 	return s.logRequests(mux)
 }
 
