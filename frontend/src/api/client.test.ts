@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { addProject, APIError, getProjects, removeProject, toggleTask, updateProposal, updateTaskText } from './client'
+import { addProject, APIError, getDirectories, getProjects, removeProject, toggleTask, updateProposal, updateTaskText } from './client'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -85,5 +85,32 @@ describe('project registry', () => {
     await removeProject('project-1')
 
     expect(fetchMock).toHaveBeenCalledWith('/api/projects/project-1', { method: 'DELETE' })
+  })
+})
+
+describe('directory browser', () => {
+  it('loads the default directory without a query', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      path: '/home/demo', parentPath: '/home', directories: [], locations: [],
+    }), { status: 200 }))
+
+    await getDirectories()
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/filesystem/directories', expect.objectContaining({
+      headers: expect.objectContaining({ Accept: 'application/json' }),
+    }))
+  })
+
+  it('encodes an explicit directory path', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      path: 'C:\\work & demos', directories: [], locations: [],
+    }), { status: 200 }))
+
+    await getDirectories('C:\\work & demos')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/filesystem/directories?path=C%3A%5Cwork%20%26%20demos',
+      expect.any(Object),
+    )
   })
 })

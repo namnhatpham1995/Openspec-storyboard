@@ -1,4 +1,4 @@
-import type { ArtifactWriteResult, ChangeDetail, FileVersion, Project, ProjectsResponse, RegisteredProject, TaskTextResult, ToggleResult } from './types'
+import type { ArtifactWriteResult, ChangeDetail, DirectoryListing, FileVersion, Project, ProjectsResponse, RegisteredProject, TaskTextResult, ToggleResult } from './types'
 
 export class APIError extends Error {
   readonly status: number
@@ -32,6 +32,10 @@ async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
 export const getCurrentProject = () => requestJSON<Project>('/api/projects/current')
 
 export const getProjects = () => requestJSON<ProjectsResponse>('/api/projects')
+
+export const getDirectories = (path = '') => requestJSON<DirectoryListing>(
+  `/api/filesystem/directories${path ? `?path=${encodeURIComponent(path)}` : ''}`,
+)
 
 export const addProject = (path: string) => requestJSON<RegisteredProject>('/api/projects', {
   method: 'POST',

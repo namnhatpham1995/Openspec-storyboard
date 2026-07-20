@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { addProject, getProjects, removeProject } from '../api/client'
 import type { Change, ChangeStatus, RegisteredProject } from '../api/types'
 import { ArtifactPipeline } from '../components/ArtifactPipeline'
+import { DirectoryBrowserDialog } from '../components/DirectoryBrowserDialog'
 import { ErrorState } from '../components/ErrorState'
 import { TaskProgress } from '../components/TaskProgress'
 import { useArrowNavigation } from '../hooks/useArrowNavigation'
@@ -171,7 +172,7 @@ export function BoardPage() {
   )
 }
 
-function ProjectForm({
+export function ProjectForm({
   path,
   setPath,
   pending,
@@ -184,19 +185,38 @@ function ProjectForm({
   error: string
   onSubmit: () => void
 }) {
+  const [browsing, setBrowsing] = useState(false)
   return (
     <form className="project-form" onSubmit={(event) => { event.preventDefault(); onSubmit() }}>
       <label htmlFor="project-path">Project folder</label>
-      <input
-        id="project-path"
-        value={path}
-        onChange={(event) => setPath(event.target.value)}
-        placeholder="C:\\work\\my-openspec-project"
-        autoFocus
-      />
+      <div className="project-path-control">
+        <input
+          id="project-path"
+          value={path}
+          onChange={(event) => setPath(event.target.value)}
+          placeholder="C:\\work\\my-openspec-project"
+          autoFocus
+        />
+        <button
+          aria-haspopup="dialog"
+          className="browse-project-button"
+          disabled={pending}
+          onClick={() => setBrowsing(true)}
+          type="button"
+        >
+          Browse…
+        </button>
+      </div>
       <button type="submit" disabled={pending || !path.trim()}>{pending ? 'Checking…' : 'Register project'}</button>
       {error && <p role="alert">{error}</p>}
       <small>The folder must contain an <code>openspec/</code> directory.</small>
+      {browsing && (
+        <DirectoryBrowserDialog
+          initialPath={path}
+          onClose={() => setBrowsing(false)}
+          onSelect={(selectedPath) => { setPath(selectedPath); setBrowsing(false) }}
+        />
+      )}
     </form>
   )
 }

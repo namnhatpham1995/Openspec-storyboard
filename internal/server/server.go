@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"storyboard/internal/directorybrowser"
 	"storyboard/internal/openspec"
 	projectregistry "storyboard/internal/registry"
 )
@@ -29,6 +30,7 @@ type Server struct {
 	watchMu     sync.Mutex
 	watchCtx    context.Context
 	watchers    map[string]*projectWatcher
+	directories directoryLister
 }
 
 // New constructs a read-only API server rooted at projectRoot.
@@ -48,6 +50,7 @@ func New(projectRoot string, logger *slog.Logger) *Server {
 		events:      newEventHub(),
 		registry:    store,
 		watchers:    make(map[string]*projectWatcher),
+		directories: directorybrowser.New(),
 	}
 }
 
@@ -66,7 +69,10 @@ func NewPersistent(configPath, initialProject string, logger *slog.Logger) (*Ser
 			return nil, fmt.Errorf("registering initial project: %w", err)
 		}
 	}
-	return &Server{logger: logger, events: newEventHub(), registry: store, watchers: make(map[string]*projectWatcher)}, nil
+	return &Server{
+		logger: logger, events: newEventHub(), registry: store,
+		watchers: make(map[string]*projectWatcher), directories: directorybrowser.New(),
+	}, nil
 }
 
 // NewWithFS is like New, but accepts an fs.FS for focused tests.
@@ -77,6 +83,7 @@ func NewWithFS(projectRoot string, projectFS fs.FS, logger *slog.Logger) *Server
 	return &Server{
 		projectRoot: projectRoot, projectFS: projectFS, logger: logger,
 		events: newEventHub(), registry: projectregistry.NewMemory(), watchers: make(map[string]*projectWatcher),
+		directories: directorybrowser.New(),
 	}
 }
 
@@ -88,6 +95,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/projects", s.handleProjects)
 	mux.HandleFunc("POST /api/projects", s.handleAddProject)
 	mux.HandleFunc("DELETE /api/projects/{projectID}", s.handleRemoveProject)
+	mux.HandleFunc("GET /api/filesystem/directories", s.handleDirectories)
 	mux.HandleFunc("GET /api/projects/{projectID}/changes/{name}", s.handleRegisteredChangeDetail)
 	mux.HandleFunc("POST /api/projects/{projectID}/changes/{name}/tasks/{id}/toggle", s.handleRegisteredTaskToggle)
 	mux.HandleFunc("PUT /api/projects/{projectID}/changes/{name}/tasks/{id}/text", s.handleRegisteredTaskText)

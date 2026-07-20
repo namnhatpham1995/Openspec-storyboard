@@ -52,6 +52,23 @@ export interface ProjectsResponse {
   projects: RegisteredProject[]
 }
 
+export interface DirectoryEntry {
+  name: string
+  path: string
+}
+
+export interface DirectoryLocation {
+  name: string
+  path: string
+}
+
+export interface DirectoryListing {
+  path: string
+  parentPath?: string
+  directories: DirectoryEntry[]
+  locations: DirectoryLocation[]
+}
+
 export interface FileVersion {
   modTime: string
   hash: string
