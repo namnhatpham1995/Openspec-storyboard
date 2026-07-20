@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,9 +10,11 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"storyboard/internal/openspec"
+	projectregistry "storyboard/internal/registry"
 )
 
 // Server serves the read-only Storyboard API for one project. The registry
@@ -22,6 +25,10 @@ type Server struct {
 	writeRoot   string
 	logger      *slog.Logger
 	events      *eventHub
+	registry    *projectregistry.Store
+	watchMu     sync.Mutex
+	watchCtx    context.Context
+	watchers    map[string]*projectWatcher
 }
 
 // New constructs a read-only API server rooted at projectRoot.
@@ -29,13 +36,37 @@ func New(projectRoot string, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	store := projectregistry.NewMemory()
+	if project, err := projectregistry.ProjectForPath(projectRoot); err == nil {
+		store = projectregistry.NewMemory(project)
+	}
 	return &Server{
 		projectRoot: projectRoot,
 		projectFS:   os.DirFS(projectRoot),
 		writeRoot:   projectRoot,
 		logger:      logger,
 		events:      newEventHub(),
+		registry:    store,
+		watchers:    make(map[string]*projectWatcher),
 	}
+}
+
+// NewPersistent constructs the production server backed by a registry file.
+// initialProject, when non-empty, is validated and registered before serving.
+func NewPersistent(configPath, initialProject string, logger *slog.Logger) (*Server, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	store, err := projectregistry.Open(configPath)
+	if err != nil {
+		return nil, err
+	}
+	if initialProject != "" {
+		if _, err := store.Add(initialProject); err != nil {
+			return nil, fmt.Errorf("registering initial project: %w", err)
+		}
+	}
+	return &Server{logger: logger, events: newEventHub(), registry: store, watchers: make(map[string]*projectWatcher)}, nil
 }
 
 // NewWithFS is like New, but accepts an fs.FS for focused tests.
@@ -43,7 +74,10 @@ func NewWithFS(projectRoot string, projectFS fs.FS, logger *slog.Logger) *Server
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{projectRoot: projectRoot, projectFS: projectFS, logger: logger, events: newEventHub()}
+	return &Server{
+		projectRoot: projectRoot, projectFS: projectFS, logger: logger,
+		events: newEventHub(), registry: projectregistry.NewMemory(), watchers: make(map[string]*projectWatcher),
+	}
 }
 
 // Handler returns the complete HTTP handler for the server.
@@ -51,6 +85,13 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/projects/current", s.handleCurrentProject)
+	mux.HandleFunc("GET /api/projects", s.handleProjects)
+	mux.HandleFunc("POST /api/projects", s.handleAddProject)
+	mux.HandleFunc("DELETE /api/projects/{projectID}", s.handleRemoveProject)
+	mux.HandleFunc("GET /api/projects/{projectID}/changes/{name}", s.handleRegisteredChangeDetail)
+	mux.HandleFunc("POST /api/projects/{projectID}/changes/{name}/tasks/{id}/toggle", s.handleRegisteredTaskToggle)
+	mux.HandleFunc("PUT /api/projects/{projectID}/changes/{name}/tasks/{id}/text", s.handleRegisteredTaskText)
+	mux.HandleFunc("PUT /api/projects/{projectID}/changes/{name}/artifacts/proposal", s.handleRegisteredProposalText)
 	mux.HandleFunc("GET /api/changes/{name}", s.handleChangeDetail)
 	mux.HandleFunc("POST /api/changes/{name}/tasks/{id}/toggle", s.handleTaskToggle)
 	mux.HandleFunc("PUT /api/changes/{name}/tasks/{id}/text", s.handleTaskText)

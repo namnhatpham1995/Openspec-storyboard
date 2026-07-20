@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -55,7 +56,11 @@ func TestRunContextGracefulShutdown(t *testing.T) {
 	defer cancel()
 	var stdout, stderr bytes.Buffer
 
-	code := runContext(ctx, []string{"--addr", "127.0.0.1:0", "--project", "../.."}, &stdout, &stderr)
+	code := runContext(ctx, []string{
+		"--addr", "127.0.0.1:0",
+		"--project", "../..",
+		"--config", filepath.Join(t.TempDir(), "config.json"),
+	}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Errorf("runContext() exit code = %d, want 0; stderr = %q", code, stderr.String())

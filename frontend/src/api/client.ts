@@ -1,4 +1,4 @@
-import type { ArtifactWriteResult, ChangeDetail, FileVersion, Project, TaskTextResult, ToggleResult } from './types'
+import type { ArtifactWriteResult, ChangeDetail, FileVersion, Project, ProjectsResponse, RegisteredProject, TaskTextResult, ToggleResult } from './types'
 
 export class APIError extends Error {
   readonly status: number
@@ -31,12 +31,28 @@ async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const getCurrentProject = () => requestJSON<Project>('/api/projects/current')
 
-export const getChangeDetail = (name: string) =>
-  requestJSON<ChangeDetail>(`/api/changes/${encodeURIComponent(name)}`)
+export const getProjects = () => requestJSON<ProjectsResponse>('/api/projects')
 
-export const toggleTask = (changeName: string, taskID: string, version: FileVersion) =>
+export const addProject = (path: string) => requestJSON<RegisteredProject>('/api/projects', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ path }),
+})
+
+export const removeProject = async (projectID: string) => {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectID)}`, { method: 'DELETE' })
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null
+    throw new APIError(body?.error?.message ?? `Request failed (${response.status})`, response.status, body?.error?.code)
+  }
+}
+
+export const getChangeDetail = (projectID: string, name: string) =>
+  requestJSON<ChangeDetail>(`/api/projects/${encodeURIComponent(projectID)}/changes/${encodeURIComponent(name)}`)
+
+export const toggleTask = (projectID: string, changeName: string, taskID: string, version: FileVersion) =>
   requestJSON<ToggleResult>(
-    `/api/changes/${encodeURIComponent(changeName)}/tasks/${encodeURIComponent(taskID)}/toggle`,
+    `/api/projects/${encodeURIComponent(projectID)}/changes/${encodeURIComponent(changeName)}/tasks/${encodeURIComponent(taskID)}/toggle`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -44,9 +60,9 @@ export const toggleTask = (changeName: string, taskID: string, version: FileVers
     },
   )
 
-export const updateTaskText = (changeName: string, taskID: string, text: string, version: FileVersion) =>
+export const updateTaskText = (projectID: string, changeName: string, taskID: string, text: string, version: FileVersion) =>
   requestJSON<TaskTextResult>(
-    `/api/changes/${encodeURIComponent(changeName)}/tasks/${encodeURIComponent(taskID)}/text`,
+    `/api/projects/${encodeURIComponent(projectID)}/changes/${encodeURIComponent(changeName)}/tasks/${encodeURIComponent(taskID)}/text`,
     {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -54,9 +70,9 @@ export const updateTaskText = (changeName: string, taskID: string, text: string,
     },
   )
 
-export const updateProposal = (changeName: string, content: string, version: FileVersion) =>
+export const updateProposal = (projectID: string, changeName: string, content: string, version: FileVersion) =>
   requestJSON<ArtifactWriteResult>(
-    `/api/changes/${encodeURIComponent(changeName)}/artifacts/proposal`,
+    `/api/projects/${encodeURIComponent(projectID)}/changes/${encodeURIComponent(changeName)}/artifacts/proposal`,
     {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },

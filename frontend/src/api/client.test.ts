@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { APIError, toggleTask, updateProposal, updateTaskText } from './client'
+import { addProject, APIError, getProjects, removeProject, toggleTask, updateProposal, updateTaskText } from './client'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -11,10 +11,10 @@ describe('toggleTask', () => {
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
 
     const version = { modTime: '2026-01-01T00:00:00Z', hash: 'old' }
-    const result = await toggleTask('demo', '1.1', version)
+    const result = await toggleTask('project-1', 'demo', '1.1', version)
 
     expect(result.task.checked).toBe(true)
-    expect(fetchMock).toHaveBeenCalledWith('/api/changes/demo/tasks/1.1/toggle', expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith('/api/projects/project-1/changes/demo/tasks/1.1/toggle', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ version }),
     }))
@@ -25,7 +25,7 @@ describe('toggleTask', () => {
       error: { code: 'file_conflict', message: 'file changed externally' },
     }), { status: 409, headers: { 'Content-Type': 'application/json' } }))
 
-    await expect(toggleTask('demo', '1.1', { modTime: '', hash: 'old' })).rejects.toEqual(
+    await expect(toggleTask('project-1', 'demo', '1.1', { modTime: '', hash: 'old' })).rejects.toEqual(
       expect.objectContaining<Partial<APIError>>({ status: 409, code: 'file_conflict' }),
     )
   })
@@ -39,9 +39,9 @@ describe('text writes', () => {
     }), { status: 200 }))
     const version = { modTime: '2026-01-01T00:00:00Z', hash: 'old' }
 
-    await updateTaskText('demo', '1.1', 'Edited', version)
+    await updateTaskText('project-1', 'demo', '1.1', 'Edited', version)
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/changes/demo/tasks/1.1/text', expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith('/api/projects/project-1/changes/demo/tasks/1.1/text', expect.objectContaining({
       method: 'PUT',
       body: JSON.stringify({ text: 'Edited', version }),
     }))
@@ -53,11 +53,37 @@ describe('text writes', () => {
     }), { status: 200 }))
     const version = { modTime: '2026-01-01T00:00:00Z', hash: 'old' }
 
-    await updateProposal('demo', '# Edited', version)
+    await updateProposal('project-1', 'demo', '# Edited', version)
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/changes/demo/artifacts/proposal', expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith('/api/projects/project-1/changes/demo/artifacts/proposal', expect.objectContaining({
       method: 'PUT',
       body: JSON.stringify({ content: '# Edited', version }),
     }))
+  })
+})
+
+describe('project registry', () => {
+  it('lists and adds projects', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ projects: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: 'project-1', path: 'C:\\work\\demo', name: 'demo', connected: true, changes: [],
+      }), { status: 201 }))
+
+    expect((await getProjects()).projects).toEqual([])
+    await addProject('C:\\work\\demo')
+
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/projects', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ path: 'C:\\work\\demo' }),
+    }))
+  })
+
+  it('removes a project without expecting a JSON body', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }))
+
+    await removeProject('project-1')
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/projects/project-1', { method: 'DELETE' })
   })
 })

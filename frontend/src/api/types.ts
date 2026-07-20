@@ -38,6 +38,20 @@ export interface Project {
   changes: Change[] | null
 }
 
+export interface RegisteredProject {
+  id: string
+  path: string
+  name: string
+  connected: boolean
+  schemaName?: string
+  changes?: Change[] | null
+  error?: string
+}
+
+export interface ProjectsResponse {
+  projects: RegisteredProject[]
+}
+
 export interface FileVersion {
   modTime: string
   hash: string

@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"storyboard/internal/registry"
 	"storyboard/internal/server"
 )
 
@@ -39,7 +40,8 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	fs := flag.NewFlagSet("storyboard", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	showVersion := fs.Bool("version", false, "print the version and exit")
-	projectRoot := fs.String("project", ".", "OpenSpec project folder to serve")
+	projectRoot := fs.String("project", "", "OpenSpec project folder to register on startup")
+	configPath := fs.String("config", "", "project registry file (defaults to the OS user config directory)")
 	address := fs.String("addr", "127.0.0.1:8080", "loopback address to listen on")
 
 	if err := fs.Parse(args); err != nil {
@@ -52,13 +54,26 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	}
 
 	logger := slog.New(slog.NewTextHandler(stderr, nil))
+	if *configPath == "" {
+		var err error
+		*configPath, err = registry.DefaultPath()
+		if err != nil {
+			logger.Error("locating project registry", "error", err)
+			return 1
+		}
+	}
 	listener, err := net.Listen("tcp", *address)
 	if err != nil {
 		logger.Error("starting server", "address", *address, "error", err)
 		return 1
 	}
 
-	app := server.New(*projectRoot, logger)
+	app, err := server.NewPersistent(*configPath, *projectRoot, logger)
+	if err != nil {
+		listener.Close()
+		logger.Error("loading project registry", "error", err)
+		return 1
+	}
 	httpServer := &http.Server{
 		Handler:           app.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -69,11 +84,11 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		serveErrors <- httpServer.Serve(listener)
 	}()
 	go func() {
-		if err := app.WatchProject(ctx); err != nil && ctx.Err() == nil {
+		if err := app.WatchProjects(ctx); err != nil && ctx.Err() == nil {
 			logger.Error("live updates stopped", "error", err)
 		}
 	}()
-	logger.Info("storyboard server started", "version", version, "address", listener.Addr(), "project", *projectRoot)
+	logger.Info("storyboard server started", "version", version, "address", listener.Addr(), "project", *projectRoot, "config", *configPath)
 
 	select {
 	case err := <-serveErrors:

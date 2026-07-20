@@ -10,12 +10,12 @@ import { TaskProgress } from '../components/TaskProgress'
 import { useArrowNavigation } from '../hooks/useArrowNavigation'
 
 export function ChangeDetailPage() {
-  const { name = '' } = useParams()
+  const { projectID = '', name = '' } = useParams()
   const queryClient = useQueryClient()
   const detail = useQuery({
-    queryKey: ['change', name],
-    queryFn: () => getChangeDetail(name),
-    enabled: Boolean(name),
+    queryKey: ['change', projectID, name],
+    queryFn: () => getChangeDetail(projectID, name),
+    enabled: Boolean(projectID && name),
   })
   const [selectedPath, setSelectedPath] = useState('')
   const [notice, setNotice] = useState<{ kind: 'conflict' | 'error'; message: string } | null>(null)
@@ -23,8 +23,8 @@ export function ChangeDetailPage() {
 
   const refreshFromDisk = async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['change', name] }),
-      queryClient.invalidateQueries({ queryKey: ['project', 'current'] }),
+      queryClient.invalidateQueries({ queryKey: ['change', projectID, name] }),
+      queryClient.invalidateQueries({ queryKey: ['projects'] }),
     ])
   }
   const writeSucceeded = async () => {
@@ -47,19 +47,19 @@ export function ChangeDetailPage() {
 
   const toggle = useMutation({
     mutationFn: ({ taskID, version }: { taskID: string; version: FileVersion }) =>
-      toggleTask(name, taskID, version),
+      toggleTask(projectID, name, taskID, version),
     onSuccess: writeSucceeded,
     onError: (error) => writeFailed(error, 'Could not update the task.'),
   })
   const taskText = useMutation({
     mutationFn: ({ taskID, text, version }: { taskID: string; text: string; version: FileVersion }) =>
-      updateTaskText(name, taskID, text, version),
+      updateTaskText(projectID, name, taskID, text, version),
     onSuccess: writeSucceeded,
     onError: (error) => writeFailed(error, 'Could not update the task text.'),
   })
   const proposalText = useMutation({
     mutationFn: ({ content, version }: { content: string; version: FileVersion }) =>
-      updateProposal(name, content, version),
+      updateProposal(projectID, name, content, version),
     onSuccess: writeSucceeded,
     onError: (error) => writeFailed(error, 'Could not update the proposal.'),
   })
