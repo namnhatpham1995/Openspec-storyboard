@@ -44,6 +44,54 @@ func TestHealth(t *testing.T) {
 	}
 }
 
+func TestServesEmbeddedSPAAndDeepLinks(t *testing.T) {
+	server, _ := testServer(t)
+	for _, route := range []string{"/", "/projects/example/changes/add-login"} {
+		response, err := http.Get(server.URL + route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, readErr := io.ReadAll(response.Body)
+		response.Body.Close()
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if response.StatusCode != http.StatusOK {
+			t.Errorf("GET %s status = %d, want 200", route, response.StatusCode)
+		}
+		if !bytes.Contains(body, []byte("<title>Storyboard</title>")) {
+			t.Errorf("GET %s did not return the Storyboard index", route)
+		}
+	}
+}
+
+func TestServesEmbeddedStaticAsset(t *testing.T) {
+	server, _ := testServer(t)
+	response, err := http.Get(server.URL + "/favicon.svg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.StatusCode)
+	}
+	if contentType := response.Header.Get("Content-Type"); contentType != "image/svg+xml" {
+		t.Errorf("Content-Type = %q, want image/svg+xml", contentType)
+	}
+}
+
+func TestUnknownAPIRouteDoesNotFallBackToSPA(t *testing.T) {
+	server, _ := testServer(t)
+	response, err := http.Get(server.URL + "/api/not-a-route")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", response.StatusCode)
+	}
+}
+
 func TestCurrentProject(t *testing.T) {
 	server, _ := testServer(t)
 	response, err := http.Get(server.URL + "/api/projects/current")

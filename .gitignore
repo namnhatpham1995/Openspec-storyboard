@@ -5,9 +5,9 @@
 *.test
 *.out
 
-# Frontend (Vite/Node) - scaffolded in a later PR
+# Frontend dependencies. The production bundle is committed so Go's embed
+# directive can build from a clean checkout without requiring Node.js.
 frontend/node_modules/
-frontend/dist/
 
 # Editor / OS
 .vscode/

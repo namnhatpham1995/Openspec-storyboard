@@ -30,6 +30,12 @@ func TestRun(t *testing.T) {
 			args:     []string{"--nope"},
 			wantCode: 2,
 		},
+		{
+			name:       "invalid port fails",
+			args:       []string{"--port", "65536"},
+			wantCode:   2,
+			wantStderr: "--port must be between 0 and 65535",
+		},
 	}
 
 	for _, tt := range tests {
@@ -62,7 +68,8 @@ func TestRunContextGracefulShutdown(t *testing.T) {
 	}
 
 	code := runContext(ctx, []string{
-		"--addr", "127.0.0.1:0",
+		"--port", "0",
+		"--no-open",
 		"--project", projectRoot,
 		"--config", filepath.Join(t.TempDir(), "config.json"),
 	}, &stdout, &stderr)
@@ -72,5 +79,29 @@ func TestRunContextGracefulShutdown(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "shutting down server") {
 		t.Errorf("stderr = %q, want graceful shutdown log", stderr.String())
+	}
+	if !strings.HasPrefix(stdout.String(), "http://127.0.0.1:") {
+		t.Errorf("stdout = %q, want selected loopback URL", stdout.String())
+	}
+}
+
+func TestBrowserCommand(t *testing.T) {
+	url := "http://127.0.0.1:12345"
+	tests := []struct {
+		goos     string
+		wantName string
+		wantArgs []string
+	}{
+		{goos: "windows", wantName: "rundll32", wantArgs: []string{"url.dll,FileProtocolHandler", url}},
+		{goos: "darwin", wantName: "open", wantArgs: []string{url}},
+		{goos: "linux", wantName: "xdg-open", wantArgs: []string{url}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.goos, func(t *testing.T) {
+			name, args := browserCommand(tt.goos, url)
+			if name != tt.wantName || strings.Join(args, "\x00") != strings.Join(tt.wantArgs, "\x00") {
+				t.Errorf("browserCommand() = %q %q, want %q %q", name, args, tt.wantName, tt.wantArgs)
+			}
+		})
 	}
 }

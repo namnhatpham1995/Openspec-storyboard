@@ -12,7 +12,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -42,7 +44,8 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	projectRoot := fs.String("project", "", "OpenSpec project folder to register on startup")
 	configPath := fs.String("config", "", "project registry file (defaults to the OS user config directory)")
-	address := fs.String("addr", "127.0.0.1:8080", "loopback address to listen on")
+	port := fs.Int("port", 0, "loopback port to listen on (0 chooses a free port)")
+	noOpen := fs.Bool("no-open", false, "do not open the app in a browser")
 
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -51,6 +54,10 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	if *showVersion {
 		fmt.Fprintln(stdout, "storyboard", version)
 		return 0
+	}
+	if *port < 0 || *port > 65535 {
+		fmt.Fprintln(stderr, "storyboard: --port must be between 0 and 65535")
+		return 2
 	}
 
 	logger := slog.New(slog.NewTextHandler(stderr, nil))
@@ -62,9 +69,10 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 			return 1
 		}
 	}
-	listener, err := net.Listen("tcp", *address)
+	address := fmt.Sprintf("127.0.0.1:%d", *port)
+	listener, err := net.Listen("tcp", address)
 	if err != nil {
-		logger.Error("starting server", "address", *address, "error", err)
+		logger.Error("starting server", "address", address, "error", err)
 		return 1
 	}
 
@@ -88,7 +96,14 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 			logger.Error("live updates stopped", "error", err)
 		}
 	}()
-	logger.Info("storyboard server started", "version", version, "address", listener.Addr(), "project", *projectRoot, "config", *configPath)
+	url := "http://" + listener.Addr().String()
+	fmt.Fprintln(stdout, url)
+	logger.Info("storyboard server started", "version", version, "url", url, "project", *projectRoot, "config", *configPath)
+	if !*noOpen {
+		if err := openBrowser(url); err != nil {
+			logger.Warn("could not open browser", "url", url, "error", err)
+		}
+	}
 
 	select {
 	case err := <-serveErrors:
@@ -111,4 +126,25 @@ func runContext(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	}
 
 	return 0
+}
+
+func openBrowser(url string) error {
+	name, args := browserCommand(runtime.GOOS, url)
+	command := exec.Command(name, args...)
+	if err := command.Start(); err != nil {
+		return err
+	}
+	go func() { _ = command.Wait() }()
+	return nil
+}
+
+func browserCommand(goos, url string) (string, []string) {
+	switch goos {
+	case "windows":
+		return "rundll32", []string{"url.dll,FileProtocolHandler", url}
+	case "darwin":
+		return "open", []string{url}
+	default:
+		return "xdg-open", []string{url}
+	}
 }
