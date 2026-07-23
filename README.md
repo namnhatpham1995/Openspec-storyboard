@@ -13,7 +13,7 @@ Storyboard is a local desktop-style board for viewing and safely editing [OpenSp
 - Watches projects recursively and streams external changes to every open browser with Server-Sent Events.
 - Runs as one local binary with the React application, fonts, and other assets embedded inside it.
 
-Storyboard only listens on `127.0.0.1`. Files on disk remain the source of truth, and the app sends no project data to an external service.
+Storyboard only listens on `127.0.0.1`. Host and `Sec-Fetch-Site` validation also blocks DNS-rebinding and explicitly cross-site requests. Files on disk remain the source of truth, and the app sends no project data to an external service.
 
 ## Run it
 

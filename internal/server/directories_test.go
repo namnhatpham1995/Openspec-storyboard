@@ -126,6 +126,7 @@ func TestDirectoriesEndpointErrors(t *testing.T) {
 			app := NewWithFS("test-project", nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 			app.directories = fake
 			request := httptest.NewRequest(http.MethodGet, "/api/filesystem/directories?path=relative", nil)
+			request.Host = "127.0.0.1"
 			response := httptest.NewRecorder()
 			app.Handler().ServeHTTP(response, request)
 			if response.Code != tt.wantStatus {
