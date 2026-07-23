@@ -8,8 +8,10 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -106,7 +108,26 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/changes/{name}/artifacts/proposal", s.handleProposalText)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.Handle("/", spaHandler())
-	return s.logRequests(mux)
+	return restrictToLoopback(s.logRequests(mux))
+}
+
+func restrictToLoopback(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hostname, _, err := net.SplitHostPort(r.Host)
+		if err != nil {
+			hostname = r.Host
+		}
+
+		switch strings.ToLower(hostname) {
+		case "127.0.0.1", "localhost", "::1":
+			if r.Header.Get("Sec-Fetch-Site") != "cross-site" {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+
+		writeAPIError(w, http.StatusForbidden, "forbidden_host", "requests must come from a local browser context")
+	})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
