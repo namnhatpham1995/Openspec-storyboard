@@ -45,7 +45,7 @@ type taskTextRequest struct {
 	Version openspec.FileVersion `json:"version"`
 }
 
-type proposalTextRequest struct {
+type artifactTextRequest struct {
 	Content string               `json:"content"`
 	Version openspec.FileVersion `json:"version"`
 }
@@ -155,17 +155,17 @@ func (s *Server) handleRegisteredTaskText(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (s *Server) handleRegisteredProposalText(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleRegisteredArtifactText(w http.ResponseWriter, r *http.Request) {
 	project, ok := s.registeredProject(w, r.PathValue("projectID"))
 	if !ok {
 		return
 	}
-	var request proposalTextRequest
+	var request artifactTextRequest
 	if err := decodeJSON(r, &request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	result, err := openspec.SaveProposalFile(project.Path, r.PathValue("name"), request.Content, request.Version)
+	result, err := openspec.SaveArtifactFile(project.Path, r.PathValue("name"), r.PathValue("path"), request.Content, request.Version)
 	if err != nil {
 		s.writeReadError(w, err)
 		return

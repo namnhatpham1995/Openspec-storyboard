@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -147,36 +149,62 @@ func UpdateTaskTextFile(projectRoot, changeName, taskID, text string, base FileV
 	return &TaskTextResult{Task: task, Version: versionFor(updated, newInfo.ModTime())}, nil
 }
 
-// SaveProposalFile replaces proposal.md verbatim after checking its base
-// version and uses the same atomic, disk-wins write path as task mutations.
-func SaveProposalFile(projectRoot, changeName, content string, base FileVersion) (*ArtifactWriteResult, error) {
+// SaveArtifactFile replaces a discovered markdown artifact verbatim after
+// checking its base version. The discovered-path allowlist prevents creating
+// files or writing outside the change directory.
+func SaveArtifactFile(projectRoot, changeName, relativePath, content string, base FileVersion) (*ArtifactWriteResult, error) {
 	changeDir, err := resolveChangeDir(projectRoot, changeName)
 	if err != nil {
 		return nil, err
 	}
-	proposalPath := filepath.Join(changeDir, "proposal.md")
-	current, info, err := readVersionedFile(proposalPath)
+	changePath, err := filepath.Rel(projectRoot, changeDir)
+	if err != nil {
+		return nil, fmt.Errorf("finding change path: %w", err)
+	}
+	changePath = filepath.ToSlash(changePath)
+	if !fs.ValidPath(changePath) {
+		return nil, ErrArtifactNotFound
+	}
+	artifactPaths, err := MarkdownArtifactPaths(os.DirFS(projectRoot), changePath)
+	if err != nil {
+		return nil, fmt.Errorf("listing artifacts for %s: %w", changeName, err)
+	}
+	if !containsArtifactPath(artifactPaths, changePath, relativePath) {
+		return nil, ErrArtifactNotFound
+	}
+
+	artifactPath := filepath.Join(changeDir, filepath.FromSlash(relativePath))
+	current, info, err := readVersionedFile(artifactPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, ErrArtifactNotFound
 		}
-		return nil, fmt.Errorf("reading proposal.md: %w", err)
+		return nil, fmt.Errorf("reading %s: %w", relativePath, err)
 	}
 	if !sameVersion(versionFor(current, info.ModTime()), base) {
 		return nil, ErrConflict
 	}
 	updated := []byte(content)
-	if err := atomicReplace(proposalPath, updated, info.Mode(), base); err != nil {
-		return nil, fmt.Errorf("writing proposal.md: %w", err)
+	if err := atomicReplace(artifactPath, updated, info.Mode(), base); err != nil {
+		return nil, fmt.Errorf("writing %s: %w", relativePath, err)
 	}
-	newInfo, err := os.Stat(proposalPath)
+	newInfo, err := os.Stat(artifactPath)
 	if err != nil {
-		return nil, fmt.Errorf("reading updated proposal.md version: %w", err)
+		return nil, fmt.Errorf("reading updated %s version: %w", relativePath, err)
 	}
 	return &ArtifactWriteResult{Artifact: Artifact{
-		Kind: "proposal", Path: "proposal.md", Content: content,
+		Kind: artifactKind(relativePath), Path: relativePath, Content: content,
 		Version: versionFor(updated, newInfo.ModTime()),
 	}}, nil
+}
+
+func containsArtifactPath(paths []string, changePath, relativePath string) bool {
+	for _, artifactPath := range paths {
+		if strings.TrimPrefix(artifactPath, changePath+"/") == relativePath {
+			return true
+		}
+	}
+	return false
 }
 
 func resolveChangeDir(projectRoot, changeName string) (string, error) {

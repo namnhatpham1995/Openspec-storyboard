@@ -61,7 +61,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/projects/{projectID}/changes/{name}", s.handleRegisteredChangeDetail)
 	mux.HandleFunc("POST /api/projects/{projectID}/changes/{name}/tasks/{id}/toggle", s.handleRegisteredTaskToggle)
 	mux.HandleFunc("PUT /api/projects/{projectID}/changes/{name}/tasks/{id}/text", s.handleRegisteredTaskText)
-	mux.HandleFunc("PUT /api/projects/{projectID}/changes/{name}/artifacts/proposal", s.handleRegisteredProposalText)
+	mux.HandleFunc("PUT /api/projects/{projectID}/changes/{name}/artifacts/{path...}", s.handleRegisteredArtifactText)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.Handle("/", spaHandler())
 	return restrictToLoopback(s.logRequests(mux))

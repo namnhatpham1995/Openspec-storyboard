@@ -182,7 +182,7 @@ func TestTaskToggleRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
-func TestTaskTextAndProposalEndpoints(t *testing.T) {
+func TestTaskTextAndArtifactEndpoints(t *testing.T) {
 	root := t.TempDir()
 	changeDir := filepath.Join(root, "openspec", "changes", "demo")
 	if err := os.MkdirAll(changeDir, 0o755); err != nil {
@@ -192,6 +192,8 @@ func TestTaskTextAndProposalEndpoints(t *testing.T) {
 		t.Fatal(err)
 	}
 	proposal := []byte("# Original\n")
+	design := []byte("# Design\n")
+	spec := []byte("# Spec\n")
 	tasks := []byte("## Work\n- [ ] 1.1 Original task\n")
 	if err := os.WriteFile(filepath.Join(changeDir, "proposal.md"), proposal, 0o644); err != nil {
 		t.Fatal(err)
@@ -199,9 +201,22 @@ func TestTaskTextAndProposalEndpoints(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(changeDir, "tasks.md"), tasks, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(changeDir, "design.md"), design, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(changeDir, "specs", "capability"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(changeDir, "specs", "capability", "spec.md"), spec, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	proposalInfo, _ := os.Stat(filepath.Join(changeDir, "proposal.md"))
+	designInfo, _ := os.Stat(filepath.Join(changeDir, "design.md"))
+	specInfo, _ := os.Stat(filepath.Join(changeDir, "specs", "capability", "spec.md"))
 	tasksInfo, _ := os.Stat(filepath.Join(changeDir, "tasks.md"))
 	proposalVersion := testVersion(proposal, proposalInfo.ModTime())
+	designVersion := testVersion(design, designInfo.ModTime())
+	specVersion := testVersion(spec, specInfo.ModTime())
 	tasksVersion := testVersion(tasks, tasksInfo.ModTime())
 
 	server, projectID := testProjectServer(t, root)
@@ -220,8 +235,8 @@ func TestTaskTextAndProposalEndpoints(t *testing.T) {
 		t.Errorf("task result = %+v", taskResult)
 	}
 
-	proposalBody, _ := json.Marshal(proposalTextRequest{Content: "# Edited\n", Version: proposalVersion})
-	proposalResponse := putJSON(t, server.URL+"/api/projects/"+projectID+"/changes/demo/artifacts/proposal", proposalBody)
+	proposalBody, _ := json.Marshal(artifactTextRequest{Content: "# Edited\n", Version: proposalVersion})
+	proposalResponse := putJSON(t, server.URL+"/api/projects/"+projectID+"/changes/demo/artifacts/proposal.md", proposalBody)
 	defer proposalResponse.Body.Close()
 	if proposalResponse.StatusCode != http.StatusOK {
 		t.Fatalf("proposal status = %d, want 200", proposalResponse.StatusCode)
@@ -234,7 +249,41 @@ func TestTaskTextAndProposalEndpoints(t *testing.T) {
 		t.Errorf("proposal result = %+v", proposalResult)
 	}
 
-	conflict := putJSON(t, server.URL+"/api/projects/"+projectID+"/changes/demo/artifacts/proposal", proposalBody)
+	designBody, _ := json.Marshal(artifactTextRequest{Content: "# Edited design\n", Version: designVersion})
+	designResponse := putJSON(t, server.URL+"/api/projects/"+projectID+"/changes/demo/artifacts/design.md", designBody)
+	defer designResponse.Body.Close()
+	if designResponse.StatusCode != http.StatusOK {
+		t.Fatalf("design status = %d, want 200", designResponse.StatusCode)
+	}
+	var designResult openspec.ArtifactWriteResult
+	if err := json.NewDecoder(designResponse.Body).Decode(&designResult); err != nil {
+		t.Fatal(err)
+	}
+	if designResult.Artifact.Kind != "design" || designResult.Artifact.Path != "design.md" {
+		t.Errorf("design result = %+v", designResult)
+	}
+
+	specBody, _ := json.Marshal(artifactTextRequest{Content: "# Edited spec\n", Version: specVersion})
+	specResponse := putJSON(t, server.URL+"/api/projects/"+projectID+"/changes/demo/artifacts/specs/capability/spec.md", specBody)
+	defer specResponse.Body.Close()
+	if specResponse.StatusCode != http.StatusOK {
+		t.Fatalf("spec status = %d, want 200", specResponse.StatusCode)
+	}
+	var specResult openspec.ArtifactWriteResult
+	if err := json.NewDecoder(specResponse.Body).Decode(&specResult); err != nil {
+		t.Fatal(err)
+	}
+	if specResult.Artifact.Kind != "spec" || specResult.Artifact.Path != "specs/capability/spec.md" {
+		t.Errorf("spec result = %+v", specResult)
+	}
+
+	missingResponse := putJSON(t, server.URL+"/api/projects/"+projectID+"/changes/demo/artifacts/missing.md", designBody)
+	defer missingResponse.Body.Close()
+	if missingResponse.StatusCode != http.StatusNotFound {
+		t.Errorf("missing artifact status = %d, want 404", missingResponse.StatusCode)
+	}
+
+	conflict := putJSON(t, server.URL+"/api/projects/"+projectID+"/changes/demo/artifacts/proposal.md", proposalBody)
 	defer conflict.Body.Close()
 	if conflict.StatusCode != http.StatusConflict {
 		t.Errorf("stale proposal status = %d, want 409", conflict.StatusCode)

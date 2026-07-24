@@ -165,33 +165,52 @@ func TestUpdateTaskTextFileAndConflict(t *testing.T) {
 	}
 }
 
-func TestSaveProposalFileAndConflict(t *testing.T) {
+func TestSaveArtifactFileAndConflict(t *testing.T) {
 	root := t.TempDir()
 	changeDir := filepath.Join(root, "openspec", "changes", "demo")
-	if err := os.MkdirAll(changeDir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(changeDir, "specs", "capability"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(changeDir, "proposal.md")
-	original := []byte("# Original\r\n\r\nKeep format.\r\n")
-	if err := os.WriteFile(path, original, 0o640); err != nil {
-		t.Fatal(err)
-	}
-	info, _ := os.Stat(path)
-	base := versionFor(original, info.ModTime())
-	updated := "# Edited\r\n\r\nRaw markdown stays raw.\r\n"
 
-	result, err := SaveProposalFile(root, "demo", updated, base)
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		relativePath string
+		kind         string
+		original     []byte
+		updated      string
+	}{
+		{"proposal.md", "proposal", []byte("# Original\r\n\r\nKeep format.\r\n"), "# Edited proposal\r\n"},
+		{"design.md", "design", []byte("# Design\n"), "# Edited design\n"},
+		{"specs/capability/spec.md", "spec", []byte("# Spec\n"), "# Edited spec\n"},
 	}
-	if result.Artifact.Content != updated || result.Artifact.Version.Hash == base.Hash {
-		t.Errorf("result = %+v", result)
+	var proposalBase FileVersion
+	for _, tt := range tests {
+		filePath := filepath.Join(changeDir, filepath.FromSlash(tt.relativePath))
+		if err := os.WriteFile(filePath, tt.original, 0o640); err != nil {
+			t.Fatal(err)
+		}
+		info, _ := os.Stat(filePath)
+		base := versionFor(tt.original, info.ModTime())
+		result, err := SaveArtifactFile(root, "demo", tt.relativePath, tt.updated, base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Artifact.Kind != tt.kind || result.Artifact.Path != tt.relativePath || result.Artifact.Content != tt.updated || result.Artifact.Version.Hash == base.Hash {
+			t.Errorf("%s result = %+v", tt.relativePath, result)
+		}
+		got, _ := os.ReadFile(filePath)
+		if !bytes.Equal(got, []byte(tt.updated)) {
+			t.Errorf("%s file = %q, want %q", tt.relativePath, got, tt.updated)
+		}
+		if tt.relativePath == "proposal.md" {
+			proposalBase = base
+		}
 	}
-	got, _ := os.ReadFile(path)
-	if !bytes.Equal(got, []byte(updated)) {
-		t.Errorf("file = %q, want %q", got, updated)
-	}
-	if _, err := SaveProposalFile(root, "demo", "stale", base); !errors.Is(err, ErrConflict) {
+	if _, err := SaveArtifactFile(root, "demo", "proposal.md", "stale", proposalBase); !errors.Is(err, ErrConflict) {
 		t.Errorf("stale save error = %v, want ErrConflict", err)
+	}
+	for _, relativePath := range []string{"missing.md", "../outside.md"} {
+		if _, err := SaveArtifactFile(root, "demo", relativePath, "blocked", FileVersion{}); !errors.Is(err, ErrArtifactNotFound) {
+			t.Errorf("save %q error = %v, want ErrArtifactNotFound", relativePath, err)
+		}
 	}
 }

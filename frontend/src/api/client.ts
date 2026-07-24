@@ -72,9 +72,9 @@ export const updateTaskText = (projectID: string, changeName: string, taskID: st
     },
   )
 
-export const updateProposal = (projectID: string, changeName: string, content: string, version: FileVersion) =>
+export const updateArtifact = (projectID: string, changeName: string, path: string, content: string, version: FileVersion) =>
   requestJSON<ArtifactWriteResult>(
-    `/api/projects/${encodeURIComponent(projectID)}/changes/${encodeURIComponent(changeName)}/artifacts/proposal`,
+    `/api/projects/${encodeURIComponent(projectID)}/changes/${encodeURIComponent(changeName)}/artifacts/${path.split('/').map(encodeURIComponent).join('/')}`,
     {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
