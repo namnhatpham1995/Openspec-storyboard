@@ -66,6 +66,10 @@ The write path carries a file modification time and SHA-256 hash from read to wr
 
 Requirements: Go from [`go.mod`](go.mod) and Node.js 24 or newer.
 
+Docker is not required for development or normal use. Storyboard runs directly
+from the local Go and Node.js toolchains, with no dependency on cached Docker
+images or pre-existing containers.
+
 Run the backend:
 
 ```text
