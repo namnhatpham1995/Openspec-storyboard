@@ -42,6 +42,28 @@ func TestReadChangeDetail(t *testing.T) {
 	}
 }
 
+func TestMarkdownArtifactPathsMatchChangeDetailArtifacts(t *testing.T) {
+	fsys := os.DirFS("testdata/real-project")
+	const changePath = "openspec/changes/build-storyboard-v1"
+	paths, err := MarkdownArtifactPaths(fsys, changePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := ReadChangeDetail(fsys, "build-storyboard-v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != len(detail.ArtifactFiles) {
+		t.Fatalf("paths = %d, artifacts = %d", len(paths), len(detail.ArtifactFiles))
+	}
+	for i, artifactPath := range paths {
+		want := strings.TrimPrefix(artifactPath, changePath+"/")
+		if got := detail.ArtifactFiles[i].Path; got != want {
+			t.Errorf("artifact %d path = %q, want %q", i, got, want)
+		}
+	}
+}
+
 func TestReadChangeDetail_Archived(t *testing.T) {
 	detail, err := ReadChangeDetail(os.DirFS("testdata/with-archive"), "old-feature")
 	if err != nil {

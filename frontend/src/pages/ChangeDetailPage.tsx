@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
 import { Link, useParams } from 'react-router-dom'
-import { APIError, getChangeDetail, toggleTask, updateProposal, updateTaskText } from '../api/client'
+import { APIError, getChangeDetail, toggleTask, updateArtifact, updateTaskText } from '../api/client'
 import type { ArtifactFile, FileVersion, Task } from '../api/types'
 import { ArtifactPipeline } from '../components/ArtifactPipeline'
 import { ErrorState } from '../components/ErrorState'
@@ -57,11 +57,11 @@ export function ChangeDetailPage() {
     onSuccess: writeSucceeded,
     onError: (error) => writeFailed(error, 'Could not update the task text.'),
   })
-  const proposalText = useMutation({
-    mutationFn: ({ content, version }: { content: string; version: FileVersion }) =>
-      updateProposal(projectID, name, content, version),
+  const artifactText = useMutation({
+    mutationFn: ({ path, content, version }: { path: string; content: string; version: FileVersion }) =>
+      updateArtifact(projectID, name, path, content, version),
     onSuccess: writeSucceeded,
-    onError: (error) => writeFailed(error, 'Could not update the proposal.'),
+    onError: (error) => writeFailed(error, 'Could not update the artifact.'),
   })
 
   const artifactFiles = detail.data?.artifactFiles
@@ -146,9 +146,9 @@ export function ChangeDetailPage() {
             <MarkdownArtifact
               key={`${selectedArtifact.path}-${writeReset}`}
               artifact={selectedArtifact}
-              saving={proposalText.isPending}
-              onSave={selectedArtifact.path === 'proposal.md'
-                ? (content, version) => proposalText.mutateAsync({ content, version }).then(() => undefined)
+              saving={artifactText.isPending}
+              onSave={selectedArtifact.path !== 'tasks.md'
+                ? (content, version) => artifactText.mutateAsync({ path: selectedArtifact.path, content, version }).then(() => undefined)
                 : undefined}
               onExternalChange={externalConflict}
             />
@@ -328,7 +328,7 @@ function MarkdownArtifact({
         <span className="mono">{artifact.path}</span>
         <span className="artifact-file-actions">
           <span title={artifact.version.hash}>rev {artifact.version.hash.slice(0, 7)}</span>
-          {onSave && !editing && <button type="button" onClick={startEditing}>Edit proposal</button>}
+          {onSave && !editing && <button type="button" onClick={startEditing}>Edit artifact</button>}
         </span>
       </div>
       {editing ? (
@@ -336,7 +336,7 @@ function MarkdownArtifact({
           <textarea
             value={draft}
             disabled={saving}
-            aria-label="Proposal markdown"
+            aria-label={`${artifact.path} markdown`}
             spellCheck={false}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
@@ -346,7 +346,7 @@ function MarkdownArtifact({
           <div className="editor-actions">
             <span>Raw Markdown · Esc cancels</span>
             <button type="button" onClick={cancel} disabled={saving}>Cancel</button>
-            <button className="is-primary" type="button" onClick={() => void save()} disabled={saving}>{saving ? 'Saving…' : 'Save proposal'}</button>
+            <button className="is-primary" type="button" onClick={() => void save()} disabled={saving}>{saving ? 'Saving…' : 'Save artifact'}</button>
           </div>
         </div>
       ) : (

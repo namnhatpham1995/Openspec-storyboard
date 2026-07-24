@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { addProject, APIError, getDirectories, getProjects, removeProject, toggleTask, updateProposal, updateTaskText } from './client'
+import { addProject, APIError, getDirectories, getProjects, removeProject, toggleTask, updateArtifact, updateTaskText } from './client'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -47,15 +47,15 @@ describe('text writes', () => {
     }))
   })
 
-  it('puts raw proposal markdown with its base version', async () => {
+  it('puts raw artifact markdown with its base version', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       artifact: { kind: 'proposal', path: 'proposal.md', content: '# Edited', version: { modTime: '', hash: 'new' } },
     }), { status: 200 }))
     const version = { modTime: '2026-01-01T00:00:00Z', hash: 'old' }
 
-    await updateProposal('project-1', 'demo', '# Edited', version)
+    await updateArtifact('project-1', 'demo', 'specs/capability/spec.md', '# Edited', version)
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/projects/project-1/changes/demo/artifacts/proposal', expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith('/api/projects/project-1/changes/demo/artifacts/specs/capability/spec.md', expect.objectContaining({
       method: 'PUT',
       body: JSON.stringify({ content: '# Edited', version }),
     }))

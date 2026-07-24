@@ -32,7 +32,7 @@ func ReadChangeDetail(fsys fs.FS, name string) (*ChangeDetail, error) {
 		return nil, err
 	}
 
-	artifactPaths, err := markdownArtifactPaths(fsys, changePath)
+	artifactPaths, err := MarkdownArtifactPaths(fsys, changePath)
 	if err != nil {
 		return nil, fmt.Errorf("listing artifacts for %s: %w", name, err)
 	}
@@ -49,7 +49,9 @@ func ReadChangeDetail(fsys fs.FS, name string) (*ChangeDetail, error) {
 	return &ChangeDetail{Change: change, ArtifactFiles: artifacts}, nil
 }
 
-func markdownArtifactPaths(fsys fs.FS, changePath string) ([]string, error) {
+// MarkdownArtifactPaths returns every markdown artifact discovered beneath a
+// change path. The returned paths are relative to fsys, not to changePath.
+func MarkdownArtifactPaths(fsys fs.FS, changePath string) ([]string, error) {
 	var paths []string
 	for _, name := range []string{"proposal.md", "design.md", "tasks.md"} {
 		candidate := path.Join(changePath, name)
@@ -91,10 +93,7 @@ func readArtifact(fsys fs.FS, changePath, artifactPath string) (Artifact, error)
 
 	sum := sha256.Sum256(content)
 	relativePath := artifactPath[len(changePath)+1:]
-	kind := "spec"
-	if path.Dir(relativePath) == "." {
-		kind = relativePath[:len(relativePath)-len(path.Ext(relativePath))]
-	}
+	kind := artifactKind(relativePath)
 
 	return Artifact{
 		Kind:    kind,
@@ -102,4 +101,11 @@ func readArtifact(fsys fs.FS, changePath, artifactPath string) (Artifact, error)
 		Content: string(content),
 		Version: FileVersion{ModTime: info.ModTime(), Hash: hex.EncodeToString(sum[:])},
 	}, nil
+}
+
+func artifactKind(relativePath string) string {
+	if path.Dir(relativePath) == "." {
+		return relativePath[:len(relativePath)-len(path.Ext(relativePath))]
+	}
+	return "spec"
 }
