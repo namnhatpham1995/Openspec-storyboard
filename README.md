@@ -66,6 +66,10 @@ The write path carries a file modification time and SHA-256 hash from read to wr
 
 Requirements: Go from [`go.mod`](go.mod) and Node.js 24 or newer.
 
+Development branches start from the latest `pre-prod` branch and open pull
+requests back into `pre-prod`. The `main` branch is reserved for tested release
+promotions from `pre-prod`.
+
 Run the backend:
 
 ```text
@@ -107,7 +111,15 @@ Build all supported release targets with a stamped version:
 go run ./scripts/release --version v1.0.0
 ```
 
-Artifacts are written to `dist/` for Windows x64, macOS Intel, macOS Apple Silicon, and Linux x64. A matching native build is executed with `--version` as part of the release command. Pushing a `v*` tag runs native GitHub-hosted builds and publishes their verified artifacts as a GitHub release.
+Artifacts are written to `dist/` for Windows x64, macOS Intel, macOS Apple Silicon, and Linux x64. A matching native build is executed with `--version` as part of the release command.
+
+To publish a release, open a pull request from `pre-prod` to `main`. Include the
+version in its Conventional Commit title, for example
+`feat(release): promote v1.1.0`, and add a `## User-facing changes` section to
+the PR description containing only concise highlights that users will notice.
+Merging that promotion PR creates the tag, builds the binaries, and publishes
+those highlights as the GitHub release notes. The Release workflow can also be
+started manually with an explicit version and user-facing notes.
 
 ## Scope
 
