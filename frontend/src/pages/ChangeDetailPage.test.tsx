@@ -3,17 +3,19 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getChangeDetail, updateArtifact } from '../api/client'
+import { archiveChange, getChangeDetail, updateArtifact } from '../api/client'
 import type { ChangeDetail, FileVersion } from '../api/types'
 import { ChangeDetailPage } from './ChangeDetailPage'
 
 vi.mock('../api/client', async (importOriginal) => ({
   ...await importOriginal<typeof import('../api/client')>(),
   getChangeDetail: vi.fn(),
+  archiveChange: vi.fn(),
   updateArtifact: vi.fn(),
 }))
 
 const getChangeDetailMock = vi.mocked(getChangeDetail)
+const archiveChangeMock = vi.mocked(archiveChange)
 const updateArtifactMock = vi.mocked(updateArtifact)
 
 const version: FileVersion = { modTime: '2026-01-01T00:00:00Z', hash: 'design-version' }
@@ -72,5 +74,31 @@ describe('ChangeDetailPage artifact editing', () => {
     await waitFor(() => expect(updateArtifactMock).toHaveBeenCalledWith(
       'project-1', 'demo', 'design.md', '# Edited design', version,
     ))
+  })
+})
+
+describe('ChangeDetailPage archive action', () => {
+  it('confirms and archives a complete change with spec deltas', async () => {
+    const user = userEvent.setup()
+    const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    getChangeDetailMock.mockResolvedValue({ ...detail, status: 'complete' })
+    archiveChangeMock.mockResolvedValue({ name: '2026-07-24-demo', path: 'openspec/changes/archive/2026-07-24-demo' })
+    renderPage()
+
+    expect(await screen.findByText(/This moves the change folder only/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Move to archive' }))
+
+    expect(confirmMock).toHaveBeenCalled()
+    await waitFor(() => expect(archiveChangeMock).toHaveBeenCalledWith(
+      'project-1', 'demo', detail.artifactFiles[3].version,
+    ))
+  })
+
+  it('does not offer archiving before a change is complete', async () => {
+    getChangeDetailMock.mockResolvedValue(detail)
+    renderPage()
+
+    await screen.findByRole('heading', { name: 'demo' })
+    expect(screen.queryByRole('button', { name: 'Move to archive' })).not.toBeInTheDocument()
   })
 })

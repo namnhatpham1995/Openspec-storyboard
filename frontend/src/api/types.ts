@@ -90,6 +90,11 @@ export interface ToggleResult {
   version: FileVersion
 }
 
+export interface ArchiveResult {
+  name: string
+  path: string
+}
+
 export interface TaskTextResult {
   task: Task
   version: FileVersion

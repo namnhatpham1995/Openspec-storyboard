@@ -40,6 +40,10 @@ type toggleTaskRequest struct {
 	Version openspec.FileVersion `json:"version"`
 }
 
+type archiveChangeRequest struct {
+	Version openspec.FileVersion `json:"version"`
+}
+
 type taskTextRequest struct {
 	Text    string               `json:"text"`
 	Version openspec.FileVersion `json:"version"`
@@ -131,6 +135,34 @@ func (s *Server) handleRegisteredTaskToggle(w http.ResponseWriter, r *http.Reque
 	}
 	result, err := openspec.ToggleTaskFile(project.Path, r.PathValue("name"), r.PathValue("id"), request.Version)
 	if err != nil {
+		s.writeReadError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleRegisteredArchive(w http.ResponseWriter, r *http.Request) {
+	project, ok := s.registeredProject(w, r.PathValue("projectID"))
+	if !ok {
+		return
+	}
+	var request archiveChangeRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	// On Windows a recursive directory watcher holds an open handle for the
+	// active change directory. Release it before the atomic directory rename,
+	// then resume live updates immediately afterward.
+	s.stopProjectWatcher(project.ID)
+	defer s.startProjectWatcher(project)
+	result, err := openspec.ArchiveChange(project.Path, r.PathValue("name"), request.Version)
+	if err != nil {
+		if !errors.Is(err, openspec.ErrChangeNotFound) && !errors.Is(err, openspec.ErrConflict) && !errors.Is(err, openspec.ErrArchiveNameConflict) {
+			s.logger.Error("archiving OpenSpec change", "error", err)
+			writeAPIError(w, http.StatusInternalServerError, "archive_failed", "could not archive: "+err.Error())
+			return
+		}
 		s.writeReadError(w, err)
 		return
 	}
