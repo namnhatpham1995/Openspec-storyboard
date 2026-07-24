@@ -36,6 +36,20 @@ type addProjectRequest struct {
 	Path string `json:"path"`
 }
 
+type toggleTaskRequest struct {
+	Version openspec.FileVersion `json:"version"`
+}
+
+type taskTextRequest struct {
+	Text    string               `json:"text"`
+	Version openspec.FileVersion `json:"version"`
+}
+
+type proposalTextRequest struct {
+	Content string               `json:"content"`
+	Version openspec.FileVersion `json:"version"`
+}
+
 func (s *Server) handleAddProject(w http.ResponseWriter, r *http.Request) {
 	var request addProjectRequest
 	if err := decodeJSON(r, &request); err != nil {

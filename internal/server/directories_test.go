@@ -3,9 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"io/fs"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -45,7 +43,7 @@ func TestDirectoriesEndpointDefaultAndExplicitPath(t *testing.T) {
 				Directories: []directorybrowser.Directory{},
 				Locations:   []directorybrowser.Location{{Name: "Home", Path: "C:\\Users\\demo"}},
 			}}
-			app := NewWithFS("test-project", nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			app := testApp(t, "")
 			app.directories = fake
 			server := httptest.NewServer(app.Handler())
 			defer server.Close()
@@ -89,7 +87,7 @@ func TestDirectoriesEndpointReturnsSortedDirectoriesOnly(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("hidden from response"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	app := NewWithFS("test-project", nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	app := testApp(t, "")
 	server := httptest.NewServer(app.Handler())
 	defer server.Close()
 
@@ -123,7 +121,7 @@ func TestDirectoriesEndpointErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := &fakeDirectoryLister{err: tt.err}
-			app := NewWithFS("test-project", nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			app := testApp(t, "")
 			app.directories = fake
 			request := httptest.NewRequest(http.MethodGet, "/api/filesystem/directories?path=relative", nil)
 			request.Host = "127.0.0.1"
