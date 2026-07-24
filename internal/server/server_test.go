@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
-	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -19,17 +18,37 @@ import (
 	"storyboard/internal/openspec"
 )
 
-func testServer(t *testing.T) (*httptest.Server, fs.FS) {
+func testApp(t *testing.T, initialProject string) *Server {
 	t.Helper()
-	projectFS := os.DirFS("../openspec/testdata/real-project")
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := httptest.NewServer(NewWithFS("test-project", projectFS, logger).Handler())
+	app, err := NewPersistent(filepath.Join(t.TempDir(), "registry.json"), initialProject, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return app
+}
+
+func testServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(testApp(t, "").Handler())
 	t.Cleanup(server.Close)
-	return server, projectFS
+	return server
+}
+
+func testProjectServer(t *testing.T, projectRoot string) (*httptest.Server, string) {
+	t.Helper()
+	app := testApp(t, projectRoot)
+	projects := app.registry.List()
+	if len(projects) != 1 {
+		t.Fatalf("registered projects = %d, want 1", len(projects))
+	}
+	server := httptest.NewServer(app.Handler())
+	t.Cleanup(server.Close)
+	return server, projects[0].ID
 }
 
 func TestHealth(t *testing.T) {
-	server, _ := testServer(t)
+	server := testServer(t)
 	response, err := http.Get(server.URL + "/api/health")
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +64,7 @@ func TestHealth(t *testing.T) {
 }
 
 func TestServesEmbeddedSPAAndDeepLinks(t *testing.T) {
-	server, _ := testServer(t)
+	server := testServer(t)
 	for _, route := range []string{"/", "/projects/example/changes/add-login"} {
 		response, err := http.Get(server.URL + route)
 		if err != nil {
@@ -66,7 +85,7 @@ func TestServesEmbeddedSPAAndDeepLinks(t *testing.T) {
 }
 
 func TestServesEmbeddedStaticAsset(t *testing.T) {
-	server, _ := testServer(t)
+	server := testServer(t)
 	response, err := http.Get(server.URL + "/favicon.svg")
 	if err != nil {
 		t.Fatal(err)
@@ -81,75 +100,16 @@ func TestServesEmbeddedStaticAsset(t *testing.T) {
 }
 
 func TestUnknownAPIRouteDoesNotFallBackToSPA(t *testing.T) {
-	server, _ := testServer(t)
-	response, err := http.Get(server.URL + "/api/not-a-route")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", response.StatusCode)
-	}
-}
-
-func TestCurrentProject(t *testing.T) {
-	server, _ := testServer(t)
-	response, err := http.Get(server.URL + "/api/projects/current")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-
-	var project openspec.Project
-	if err := json.NewDecoder(response.Body).Decode(&project); err != nil {
-		t.Fatal(err)
-	}
-	if project.Root != "test-project" || len(project.Changes) != 1 {
-		t.Errorf("project = %+v", project)
-	}
-}
-
-func TestChangeDetail(t *testing.T) {
-	server, _ := testServer(t)
-	response, err := http.Get(server.URL + "/api/changes/build-storyboard-v1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", response.StatusCode)
-	}
-	var detail openspec.ChangeDetail
-	if err := json.NewDecoder(response.Body).Decode(&detail); err != nil {
-		t.Fatal(err)
-	}
-	if detail.Name != "build-storyboard-v1" || len(detail.ArtifactFiles) == 0 {
-		t.Errorf("detail = %+v", detail)
-	}
-}
-
-func TestChangeDetailNotFound(t *testing.T) {
-	server, _ := testServer(t)
-	response, err := http.Get(server.URL + "/api/changes/missing")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", response.StatusCode)
-	}
-	var body struct {
-		Error struct {
-			Code string `json:"code"`
-		} `json:"error"`
-	}
-	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
-		t.Fatal(err)
-	}
-	if body.Error.Code != "change_not_found" {
-		t.Errorf("error code = %q", body.Error.Code)
+	server := testServer(t)
+	for _, path := range []string{"/api/not-a-route", "/api/projects/current", "/api/changes/demo"} {
+		response, err := http.Get(server.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusNotFound {
+			t.Errorf("GET %s status = %d, want 404", path, response.StatusCode)
+		}
 	}
 }
 
@@ -169,11 +129,9 @@ func TestTaskToggleAndConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := httptest.NewServer(New(root, logger).Handler())
-	defer server.Close()
+	server, projectID := testProjectServer(t, root)
 
-	detailResponse, err := http.Get(server.URL + "/api/changes/demo")
+	detailResponse, err := http.Get(server.URL + "/api/projects/" + projectID + "/changes/demo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +148,7 @@ func TestTaskToggleAndConflict(t *testing.T) {
 	}
 	body, _ := json.Marshal(toggleTaskRequest{Version: version})
 
-	response := postJSON(t, server.URL+"/api/changes/demo/tasks/1.1/toggle", body)
+	response := postJSON(t, server.URL+"/api/projects/"+projectID+"/changes/demo/tasks/1.1/toggle", body)
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("toggle status = %d, want 200", response.StatusCode)
 	}
@@ -203,7 +161,7 @@ func TestTaskToggleAndConflict(t *testing.T) {
 		t.Errorf("result = %+v", result)
 	}
 
-	conflict := postJSON(t, server.URL+"/api/changes/demo/tasks/1.1/toggle", body)
+	conflict := postJSON(t, server.URL+"/api/projects/"+projectID+"/changes/demo/tasks/1.1/toggle", body)
 	defer conflict.Body.Close()
 	if conflict.StatusCode != http.StatusConflict {
 		t.Errorf("stale toggle status = %d, want 409", conflict.StatusCode)
@@ -211,11 +169,13 @@ func TestTaskToggleAndConflict(t *testing.T) {
 }
 
 func TestTaskToggleRejectsInvalidJSON(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := httptest.NewServer(New(t.TempDir(), logger).Handler())
-	defer server.Close()
+	projectRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(projectRoot, "openspec"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server, projectID := testProjectServer(t, projectRoot)
 
-	response := postJSON(t, server.URL+"/api/changes/demo/tasks/1.1/toggle", []byte(`{"unknown":true}`))
+	response := postJSON(t, server.URL+"/api/projects/"+projectID+"/changes/demo/tasks/1.1/toggle", []byte(`{"unknown":true}`))
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", response.StatusCode)
@@ -244,12 +204,10 @@ func TestTaskTextAndProposalEndpoints(t *testing.T) {
 	proposalVersion := testVersion(proposal, proposalInfo.ModTime())
 	tasksVersion := testVersion(tasks, tasksInfo.ModTime())
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := httptest.NewServer(New(root, logger).Handler())
-	defer server.Close()
+	server, projectID := testProjectServer(t, root)
 
 	taskBody, _ := json.Marshal(taskTextRequest{Text: "Edited task", Version: tasksVersion})
-	taskResponse := putJSON(t, server.URL+"/api/changes/demo/tasks/1.1/text", taskBody)
+	taskResponse := putJSON(t, server.URL+"/api/projects/"+projectID+"/changes/demo/tasks/1.1/text", taskBody)
 	defer taskResponse.Body.Close()
 	if taskResponse.StatusCode != http.StatusOK {
 		t.Fatalf("task text status = %d, want 200", taskResponse.StatusCode)
@@ -263,7 +221,7 @@ func TestTaskTextAndProposalEndpoints(t *testing.T) {
 	}
 
 	proposalBody, _ := json.Marshal(proposalTextRequest{Content: "# Edited\n", Version: proposalVersion})
-	proposalResponse := putJSON(t, server.URL+"/api/changes/demo/artifacts/proposal", proposalBody)
+	proposalResponse := putJSON(t, server.URL+"/api/projects/"+projectID+"/changes/demo/artifacts/proposal", proposalBody)
 	defer proposalResponse.Body.Close()
 	if proposalResponse.StatusCode != http.StatusOK {
 		t.Fatalf("proposal status = %d, want 200", proposalResponse.StatusCode)
@@ -276,7 +234,7 @@ func TestTaskTextAndProposalEndpoints(t *testing.T) {
 		t.Errorf("proposal result = %+v", proposalResult)
 	}
 
-	conflict := putJSON(t, server.URL+"/api/changes/demo/artifacts/proposal", proposalBody)
+	conflict := putJSON(t, server.URL+"/api/projects/"+projectID+"/changes/demo/artifacts/proposal", proposalBody)
 	defer conflict.Body.Close()
 	if conflict.StatusCode != http.StatusConflict {
 		t.Errorf("stale proposal status = %d, want 409", conflict.StatusCode)

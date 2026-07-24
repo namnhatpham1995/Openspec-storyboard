@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,8 +14,7 @@ import (
 )
 
 func TestEventsEndpointBroadcasts(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	app := NewWithFS("test-project", nil, logger)
+	app := testApp(t, "")
 	testServer := httptest.NewServer(app.Handler())
 	defer testServer.Close()
 

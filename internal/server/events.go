@@ -105,15 +105,6 @@ func writeSSE(w http.ResponseWriter, event liveEvent) error {
 	return err
 }
 
-// WatchProject runs the project's recursive watcher until ctx is cancelled.
-// Failed reparses are logged and retried on the next filesystem event.
-func (s *Server) WatchProject(ctx context.Context) error {
-	if s.writeRoot == "" {
-		return nil
-	}
-	return s.watchRoot(ctx, "", "", s.projectRoot)
-}
-
 // WatchProjects maintains one watcher for every registered project and reacts
 // to projects added or removed through the API.
 func (s *Server) WatchProjects(ctx context.Context) error {
