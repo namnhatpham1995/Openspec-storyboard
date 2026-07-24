@@ -2,55 +2,127 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
   workflow_dispatch:
     inputs:
       version:
         description: "Release version to build and tag, e.g. v1.2.3"
         required: true
         type: string
+      release_notes:
+        description: "User-facing release highlights in Markdown"
+        required: true
+        type: string
 
 permissions:
   contents: write
+  pull-requests: read
 
 jobs:
   prepare:
-    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.resolve.outputs.version }}
     steps:
+      - id: promotion
+        if: github.event_name == 'push'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo
+            const { data: pulls } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner,
+              repo,
+              commit_sha: context.sha,
+            })
+            const promotion = pulls.find((pull) =>
+              pull.merged_at &&
+              pull.base.ref === 'main' &&
+              pull.head.ref === 'pre-prod' &&
+              pull.head.repo?.full_name === `${owner}/${repo}`
+            )
+            if (!promotion) {
+              core.info('The main update was not a pre-prod promotion; no release will be created.')
+              core.setOutput('matched', 'false')
+              return
+            }
+            core.setOutput('matched', 'true')
+            core.setOutput('title', promotion.title)
+            core.setOutput('body', promotion.body || '')
       - uses: actions/checkout@v4
-      - name: Validate version input
+        if: github.event_name == 'workflow_dispatch' || steps.promotion.outputs.matched == 'true'
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - id: resolve
+        name: Resolve release version and notes
+        if: github.event_name == 'workflow_dispatch' || steps.promotion.outputs.matched == 'true'
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_VERSION: ${{ inputs.version }}
+          MANUAL_RELEASE_NOTES: ${{ inputs.release_notes }}
+          PROMOTION_TITLE: ${{ steps.promotion.outputs.title }}
+          PROMOTION_BODY: ${{ steps.promotion.outputs.body }}
         run: |
-          version="${{ inputs.version }}"
-          if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
-            echo "::error::Invalid version '$version' — must match v* (e.g. v1.2.3)"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            version="$MANUAL_VERSION"
+            notes="$MANUAL_RELEASE_NOTES"
+          else
+            if [[ "$PROMOTION_TITLE" =~ (v[0-9]+\.[0-9]+\.[0-9]+) ]]; then
+              version="${BASH_REMATCH[1]}"
+            else
+              echo "::error::Promotion PR title must include a version such as v1.2.3"
+              exit 1
+            fi
+            notes="$(
+              printf '%s\n' "$PROMOTION_BODY" |
+                awk '
+                  /^## User-facing changes[[:space:]]*$/ { capture = 1; next }
+                  capture && /^## / { exit }
+                  capture { print }
+                '
+            )"
+          fi
+
+          if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version '$version' — expected vMAJOR.MINOR.PATCH"
             exit 1
           fi
-      - name: Check tag does not already exist
-        shell: bash
-        run: |
-          version="${{ inputs.version }}"
-          if git ls-remote --tags origin "refs/tags/$version" | grep -q "$version"; then
+          if [[ -z "${notes//[[:space:]]/}" ]]; then
+            echo "::error::Release notes must contain concise user-facing highlights"
+            exit 1
+          fi
+          if git ls-remote --tags origin "refs/tags/$version" | grep -Fq "refs/tags/$version"; then
             echo "::error::Tag '$version' already exists on origin"
             exit 1
           fi
+
+          {
+            echo "## Highlights"
+            echo
+            printf '%s\n' "$notes"
+          } > release-notes.md
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Create and push tag
+        if: github.event_name == 'workflow_dispatch' || steps.promotion.outputs.matched == 'true'
         shell: bash
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
         run: |
-          version="${{ inputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "$version"
-          git push origin "$version"
-      - id: resolve
-        run: echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          git tag "$VERSION"
+          git push origin "$VERSION"
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' || steps.promotion.outputs.matched == 'true'
+        with:
+          name: release-notes
+          path: release-notes.md
 
   build:
     needs: [prepare]
-    if: always() && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
+    if: needs.prepare.outputs.version != ''
     strategy:
       matrix:
         include:
@@ -70,7 +142,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.prepare.outputs.version || github.ref_name }}
+          ref: ${{ needs.prepare.outputs.version }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -81,7 +153,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Build and verify release binary
         shell: bash
-        run: go run ./scripts/release --version "${{ needs.prepare.outputs.version || github.ref_name }}" --target "${{ matrix.target }}"
+        run: go run ./scripts/release --version "${{ needs.prepare.outputs.version }}" --target "${{ matrix.target }}"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
@@ -89,15 +161,18 @@ jobs:
 
   publish:
     needs: [prepare, build]
-    if: always() && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
+          pattern: storyboard-*
           path: dist
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.prepare.outputs.version || github.ref_name }}
+          tag_name: ${{ needs.prepare.outputs.version }}
           files: dist/*
-          generate_release_notes: true
+          body_path: release-notes.md
