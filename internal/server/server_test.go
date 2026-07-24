@@ -182,6 +182,95 @@ func TestTaskToggleRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestArchiveEndpoint(t *testing.T) {
+	tests := []struct {
+		name       string
+		prepare    func(t *testing.T, root string)
+		stale      bool
+		wantStatus int
+		wantCode   string
+	}{
+		{name: "success", wantStatus: http.StatusOK},
+		{name: "version conflict", stale: true, wantStatus: http.StatusConflict, wantCode: "file_conflict"},
+		{
+			name: "archive name collision", wantStatus: http.StatusConflict, wantCode: "archive_name_conflict",
+			prepare: func(t *testing.T, root string) {
+				t.Helper()
+				name := time.Now().Format("2006-01-02") + "-demo"
+				if err := os.MkdirAll(filepath.Join(root, "openspec", "changes", "archive", name), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "archive failure includes its cause", wantStatus: http.StatusInternalServerError, wantCode: "archive_failed",
+			prepare: func(t *testing.T, root string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(root, "openspec", "changes", "archive"), []byte("not a directory"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			changeDir := filepath.Join(root, "openspec", "changes", "demo")
+			if err := os.MkdirAll(changeDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "openspec", "config.yaml"), []byte("schema: spec-driven\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			tasks := []byte("- [x] 1.1 Done\n")
+			tasksPath := filepath.Join(changeDir, "tasks.md")
+			if err := os.WriteFile(tasksPath, tasks, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			info, err := os.Stat(tasksPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			version := testVersion(tasks, info.ModTime())
+			if tt.stale {
+				version.Hash = "stale"
+			}
+			if tt.prepare != nil {
+				tt.prepare(t, root)
+			}
+
+			server, projectID := testProjectServer(t, root)
+			body, _ := json.Marshal(archiveChangeRequest{Version: version})
+			response := postJSON(t, server.URL+"/api/projects/"+projectID+"/changes/demo/archive", body)
+			defer response.Body.Close()
+			if response.StatusCode != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", response.StatusCode, tt.wantStatus)
+			}
+			if tt.wantCode != "" {
+				var payload struct {
+					Error struct {
+						Code string `json:"code"`
+					} `json:"error"`
+				}
+				if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+					t.Fatal(err)
+				}
+				if payload.Error.Code != tt.wantCode {
+					t.Errorf("error code = %q, want %q", payload.Error.Code, tt.wantCode)
+				}
+				return
+			}
+			var result openspec.ArchiveResult
+			if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+				t.Fatal(err)
+			}
+			if result.Name == "" || result.Path == "" {
+				t.Errorf("result = %+v", result)
+			}
+		})
+	}
+}
+
 func TestTaskTextAndArtifactEndpoints(t *testing.T) {
 	root := t.TempDir()
 	changeDir := filepath.Join(root, "openspec", "changes", "demo")

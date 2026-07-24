@@ -119,3 +119,10 @@ type TaskTextResult struct {
 type ArtifactWriteResult struct {
 	Artifact Artifact `json:"artifact"`
 }
+
+// ArchiveResult identifies the new project-relative location of an archived
+// change directory.
+type ArchiveResult struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}

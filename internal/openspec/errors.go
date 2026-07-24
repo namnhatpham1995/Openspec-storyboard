@@ -21,6 +21,10 @@ var ErrArtifactNotFound = errors.New("openspec artifact not found")
 // ErrConflict is returned when a write is based on a stale file version.
 var ErrConflict = errors.New("file changed externally")
 
+// ErrArchiveNameConflict is returned when an archive already contains the
+// date-prefixed name that would be assigned to a change.
+var ErrArchiveNameConflict = errors.New("archive change name already exists")
+
 // ErrInvalidTaskLine is returned when line surgery is asked to modify a line
 // that does not contain a recognizable task checkbox.
 var ErrInvalidTaskLine = errors.New("line does not contain a task checkbox")

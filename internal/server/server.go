@@ -59,6 +59,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/projects/{projectID}", s.handleRemoveProject)
 	mux.HandleFunc("GET /api/filesystem/directories", s.handleDirectories)
 	mux.HandleFunc("GET /api/projects/{projectID}/changes/{name}", s.handleRegisteredChangeDetail)
+	mux.HandleFunc("POST /api/projects/{projectID}/changes/{name}/archive", s.handleRegisteredArchive)
 	mux.HandleFunc("POST /api/projects/{projectID}/changes/{name}/tasks/{id}/toggle", s.handleRegisteredTaskToggle)
 	mux.HandleFunc("PUT /api/projects/{projectID}/changes/{name}/tasks/{id}/text", s.handleRegisteredTaskText)
 	mux.HandleFunc("PUT /api/projects/{projectID}/changes/{name}/artifacts/{path...}", s.handleRegisteredArtifactText)
@@ -102,6 +103,8 @@ func (s *Server) writeReadError(w http.ResponseWriter, err error) {
 		writeAPIError(w, http.StatusNotFound, "artifact_not_found", err.Error())
 	case errors.Is(err, openspec.ErrConflict):
 		writeAPIError(w, http.StatusConflict, "file_conflict", err.Error())
+	case errors.Is(err, openspec.ErrArchiveNameConflict):
+		writeAPIError(w, http.StatusConflict, "archive_name_conflict", err.Error())
 	case errors.Is(err, openspec.ErrInvalidTaskLine):
 		writeAPIError(w, http.StatusUnprocessableEntity, "invalid_task_line", err.Error())
 	case errors.Is(err, openspec.ErrInvalidTaskText):

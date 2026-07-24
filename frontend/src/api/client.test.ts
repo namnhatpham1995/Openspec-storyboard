@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { addProject, APIError, getDirectories, getProjects, removeProject, toggleTask, updateArtifact, updateTaskText } from './client'
+import { addProject, APIError, archiveChange, getDirectories, getProjects, removeProject, toggleTask, updateArtifact, updateTaskText } from './client'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -58,6 +58,21 @@ describe('text writes', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/projects/project-1/changes/demo/artifacts/specs/capability/spec.md', expect.objectContaining({
       method: 'PUT',
       body: JSON.stringify({ content: '# Edited', version }),
+    }))
+  })
+})
+
+describe('archiveChange', () => {
+  it('posts the tasks base version to the archive endpoint', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      name: '2026-07-24-demo', path: 'openspec/changes/archive/2026-07-24-demo',
+    }), { status: 200 }))
+    const version = { modTime: '2026-01-01T00:00:00Z', hash: 'old' }
+
+    await archiveChange('project-1', 'demo', version)
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/projects/project-1/changes/demo/archive', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ version }),
     }))
   })
 })

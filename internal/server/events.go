@@ -23,6 +23,7 @@ type liveEvent struct {
 
 type projectWatcher struct {
 	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 type eventHub struct {
@@ -116,12 +117,17 @@ func (s *Server) WatchProjects(ctx context.Context) error {
 	}
 	<-ctx.Done()
 	s.watchMu.Lock()
+	watchers := make([]*projectWatcher, 0, len(s.watchers))
 	for id, watcher := range s.watchers {
 		watcher.cancel()
+		watchers = append(watchers, watcher)
 		delete(s.watchers, id)
 	}
 	s.watchCtx = nil
 	s.watchMu.Unlock()
+	for _, watcher := range watchers {
+		<-watcher.done
+	}
 	return nil
 }
 
@@ -136,11 +142,12 @@ func (s *Server) startProjectWatcher(project projectregistry.Project) {
 		return
 	}
 	ctx, cancel := context.WithCancel(s.watchCtx)
-	handle := &projectWatcher{cancel: cancel}
+	handle := &projectWatcher{cancel: cancel, done: make(chan struct{})}
 	s.watchers[project.ID] = handle
 	s.watchMu.Unlock()
 
 	go func() {
+		defer close(handle.done)
 		err := s.watchRoot(ctx, project.ID, project.Name, project.Path)
 		s.watchMu.Lock()
 		if s.watchers[project.ID] == handle {
@@ -155,10 +162,14 @@ func (s *Server) startProjectWatcher(project projectregistry.Project) {
 
 func (s *Server) stopProjectWatcher(id string) {
 	s.watchMu.Lock()
-	defer s.watchMu.Unlock()
-	if watcher := s.watchers[id]; watcher != nil {
-		watcher.cancel()
+	watcher := s.watchers[id]
+	if watcher != nil {
 		delete(s.watchers, id)
+	}
+	s.watchMu.Unlock()
+	if watcher != nil {
+		watcher.cancel()
+		<-watcher.done
 	}
 }
 

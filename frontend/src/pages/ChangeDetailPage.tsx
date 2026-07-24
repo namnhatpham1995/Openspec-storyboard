@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
-import { Link, useParams } from 'react-router-dom'
-import { APIError, getChangeDetail, toggleTask, updateArtifact, updateTaskText } from '../api/client'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { APIError, archiveChange, getChangeDetail, toggleTask, updateArtifact, updateTaskText } from '../api/client'
 import type { ArtifactFile, FileVersion, Task } from '../api/types'
 import { ArtifactPipeline } from '../components/ArtifactPipeline'
 import { ErrorState } from '../components/ErrorState'
@@ -11,6 +11,7 @@ import { useArrowNavigation } from '../hooks/useArrowNavigation'
 
 export function ChangeDetailPage() {
   const { projectID = '', name = '' } = useParams()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const detail = useQuery({
     queryKey: ['change', projectID, name],
@@ -67,6 +68,29 @@ export function ChangeDetailPage() {
   const artifactFiles = detail.data?.artifactFiles
   const selectedArtifact = artifactFiles?.find((artifact) => artifact.path === selectedPath) ?? artifactFiles?.[0]
   const tasksVersion = artifactFiles?.find((artifact) => artifact.path === 'tasks.md')?.version
+  const archive = useMutation({
+    mutationFn: (version: FileVersion) => archiveChange(projectID, name, version),
+    onSuccess: async () => {
+      setNotice(null)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['change', projectID, name] }),
+        queryClient.invalidateQueries({ queryKey: ['projects'] }),
+      ])
+      navigate('/')
+    },
+    onError: (error) => {
+      if (error instanceof APIError && error.code === 'archive_name_conflict') {
+        setNotice({ kind: 'error', message: error.message })
+        return
+      }
+      void writeFailed(error, 'Could not move the change to the archive.')
+    },
+  })
+
+  const confirmArchive = () => {
+    if (!tasksVersion || !window.confirm('Move this completed change to the archive? This cannot be undone here.')) return
+    archive.mutate(tasksVersion)
+  }
 
   useEffect(() => {
     if (!selectedPath && artifactFiles?.[0]) setSelectedPath(artifactFiles[0].path)
@@ -92,6 +116,19 @@ export function ChangeDetailPage() {
         <div><p className="eyebrow">Artifact pipeline</p><ArtifactPipeline artifacts={detail.data.artifacts} /></div>
         <p className="disk-note"><span aria-hidden="true">↻</span> Read directly from disk</p>
       </section>
+
+      {detail.data.status === 'complete' && (
+        <section className="archive-action" aria-label="Archive change">
+          <div>
+            <p className="eyebrow">Lifecycle</p>
+            <p>Move this completed change to the archive.</p>
+            {detail.data.artifacts.specs && <p className="archive-note">This moves the change folder only. Merge its spec changes with <code>openspec archive</code> or <code>/opsx:sync</code> first if needed.</p>}
+          </div>
+          <button type="button" onClick={confirmArchive} disabled={!tasksVersion || archive.isPending}>
+            {archive.isPending ? 'Moving…' : 'Move to archive'}
+          </button>
+        </section>
+      )}
 
       {notice && (
         <div className={`write-notice write-notice--${notice.kind}`} role="alert">
